@@ -17,8 +17,10 @@ class Settings:
     anthropic_api_key: str
     anthropic_model: str
     anthropic_effort: str
+    web_search_max_uses: int
     # Mock timing, so the mock feels like a real stream. Tests change these.
     mock_word_delay: float = 0.04
+    mock_search_delay: float = 1.5
 
     @property
     def brain_mode(self) -> str:
@@ -32,6 +34,7 @@ def load_settings() -> Settings:
         anthropic_api_key=_env("ANTHROPIC_API_KEY"),
         anthropic_model=_env("ANTHROPIC_MODEL", "claude-haiku-5-5"),
         anthropic_effort=_env("ANTHROPIC_EFFORT", "low"),
+        web_search_max_uses=int(_env("WEB_SEARCH_MAX_USES", "2")),
     )
 
 

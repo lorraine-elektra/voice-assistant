@@ -18,8 +18,10 @@ and stamps every reply message with its turn, so the browser can ignore anything
 | type | fields | meaning |
 | --- | --- | --- |
 | `ready` | `brain` | Sent once after connecting. `brain` is `mock` or `claude`. |
-| `status` | `turn`, `state` | What the backend is doing. `state` is `thinking`. |
+| `status` | `turn`, `state` | What the backend is doing. `state` is `thinking` or `searching` (a web search is running). |
 | `sentence` | `turn`, `index`, `text` | One finished sentence of the reply. `index` counts from 0 inside the turn. Speak them in order. |
+| `search_failed` | `turn` | The web search did not work. The reply carries on from what the assistant already knows. |
+| `sources` | `turn`, `sources` | Web pages the answer used, as a list of `{"title", "url"}`. Show them as links. Never speak them. |
 | `done` | `turn` | The reply is complete. |
 | `cancelled` | `turn` | The reply was cancelled. Nothing more arrives for this turn. |
 | `error` | `message`, maybe `turn` | Something went wrong. `message` is safe to show to the user. |
@@ -37,4 +39,20 @@ backend  {"type": "status", "turn": 1, "state": "thinking"}
 backend  {"type": "sentence", "turn": 1, "index": 0, "text": "Hi!"}
 backend  {"type": "sentence", "turn": 1, "index": 1, "text": "How can I help?"}
 backend  {"type": "done", "turn": 1}
+```
+
+## Example with a web search
+
+When a search starts the backend sends the `searching` status and then a short filler
+sentence ("Let me look that up.") to speak, so there is no long silence.
+
+```
+browser  {"type": "user_text", "text": "What is the weather in Paris today?"}
+backend  {"type": "status", "turn": 2, "state": "thinking"}
+backend  {"type": "status", "turn": 2, "state": "searching"}
+backend  {"type": "sentence", "turn": 2, "index": 0, "text": "Let me look that up."}
+backend  {"type": "status", "turn": 2, "state": "thinking"}
+backend  {"type": "sentence", "turn": 2, "index": 1, "text": "According to ..."}
+backend  {"type": "sources", "turn": 2, "sources": [{"title": "...", "url": "https://..."}]}
+backend  {"type": "done", "turn": 2}
 ```

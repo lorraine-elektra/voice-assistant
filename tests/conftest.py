@@ -11,6 +11,7 @@ def mock_mode(monkeypatch):
     monkeypatch.setattr(settings, "mock_mode", True)
     monkeypatch.setattr(settings, "anthropic_api_key", "")
     monkeypatch.setattr(settings, "mock_word_delay", 0)
+    monkeypatch.setattr(settings, "mock_search_delay", 0)
 
 
 @pytest.fixture

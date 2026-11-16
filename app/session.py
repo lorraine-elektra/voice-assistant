@@ -7,6 +7,7 @@ from fastapi import WebSocket
 
 from app.brain import reply_events
 from app.config import settings
+from app.prompts import SEARCH_FILLER
 from app.sentences import SentenceSplitter
 
 log = logging.getLogger("voice")
@@ -82,10 +83,26 @@ class Session:
 
         try:
             await self.send(type="status", turn=turn, state="thinking")
+            searched = False
             async for event in reply_events(self.history):
-                if event["type"] == "text":
+                kind = event["type"]
+                if kind == "text":
                     for sentence in splitter.feed(event["text"]):
                         await say(sentence)
+                elif kind == "searching":
+                    for sentence in splitter.flush():
+                        await say(sentence)
+                    await self.send(type="status", turn=turn, state="searching")
+                    if not searched:  # fill the silence, once per reply
+                        await say(SEARCH_FILLER)
+                    searched = True
+                elif kind == "search_done":
+                    await self.send(type="status", turn=turn, state="thinking")
+                elif kind == "search_failed":
+                    log.warning("Web search failed on turn %s: %s", turn, event.get("reason"))
+                    await self.send(type="search_failed", turn=turn)
+                elif kind == "sources":
+                    await self.send(type="sources", turn=turn, sources=event["sources"])
             for sentence in splitter.flush():
                 await say(sentence)
             await self.send(type="done", turn=turn)
