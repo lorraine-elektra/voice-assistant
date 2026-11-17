@@ -65,7 +65,7 @@ export class Player {
     this.audio.play().catch(fallback);
   }
 
-  speakWithBrowser(text, started, finish) {
+  speakWithBrowser(text, started, finish, retry = false) {
     if (!canSpeak) {
       started();
       this.watchdog = setTimeout(finish, 300);
