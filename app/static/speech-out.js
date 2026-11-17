@@ -1,5 +1,8 @@
 // Speaks sentences one after another, in the order they were queued.
+// A sentence is spoken with ElevenLabs audio from the backend when there is some,
+// otherwise with the browser's own voice.
 export const canSpeak = "speechSynthesis" in window;
+const AUDIO_WAIT_MS = 8000; // how long to wait for a sentence's audio before giving up
 
 export class Player {
   constructor({ onStart, onIdle }) {
@@ -8,10 +11,12 @@ export class Player {
     this.queue = [];
     this.speaking = false;
     this.generation = 0;    // goes up on stop(), so late callbacks are ignored
+    this.audio = new Audio();
   }
 
-  enqueue(text) {
-    this.queue.push(text);
+  // audio: optional promise of base64 MP3 (or null if the backend could not make it).
+  enqueue(text, audio = null) {
+    this.queue.push({ text, audio });
     if (!this.speaking) this.next();
   }
 
@@ -21,12 +26,13 @@ export class Player {
     this.queue = [];
     this.speaking = false;
     clearTimeout(this.watchdog);
+    this.audio.pause();
     if (canSpeak) speechSynthesis.cancel();
   }
 
-  next() {
-    const text = this.queue.shift();
-    if (text === undefined) {
+  async next() {
+    const item = this.queue.shift();
+    if (!item) {
       this.speaking = false;
       this.onIdle();
       return;
@@ -40,17 +46,32 @@ export class Player {
       clearTimeout(this.watchdog);
       this.next();
     };
-    this.play(text, generation, finish);
+    const started = () => generation === this.generation && this.onStart();
+
+    const timeout = new Promise((resolve) => setTimeout(resolve, AUDIO_WAIT_MS, null));
+    const mp3 = item.audio && (await Promise.race([item.audio, timeout]));
+    if (generation !== this.generation) return; // stopped while waiting for the audio
+    const useBrowser = () => generation === this.generation && this.speakWithBrowser(item.text, started, finish);
+    if (mp3) this.playAudio(mp3, started, useBrowser, finish);
+    else useBrowser();
   }
 
-  play(text, generation, finish) {
+  playAudio(mp3, started, fallback, finish) {
+    this.audio.src = `data:audio/mpeg;base64,${mp3}`;
+    this.audio.onplaying = started;
+    this.audio.onended = finish;
+    this.audio.onerror = fallback;
+    this.audio.play().catch(fallback);
+  }
+
+  speakWithBrowser(text, started, finish) {
     if (!canSpeak) {
-      this.onStart();
+      started();
       this.watchdog = setTimeout(finish, 300);
       return;
     }
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onstart = () => generation === this.generation && this.onStart();
+    utterance.onstart = started;
     utterance.onend = finish;
     utterance.onerror = finish;
     // Some browsers never fire "end". Move on after a generous wait.
