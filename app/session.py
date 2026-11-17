@@ -16,8 +16,19 @@ from app.sentences import SentenceSplitter
 
 log = logging.getLogger("voice")
 ERROR_TEXT = "Sorry, something went wrong on my side. Please try again."
+BUSY_TEXT = "The assistant has reached its free usage limit for now. Please wait a minute and try again."
+SLOW_TEXT = "The assistant took too long to answer. Please try again."
 ABENA_LIMIT_TEXT = "Abena could not hear that. Its free speech limit may be used up, so please type your message instead."
 PHRASE_FAILED_TEXT = "I could not hear that. Please try again."
+
+
+def error_text(error: Exception) -> str:
+    """What to tell the user when a reply fails. Never includes details or keys."""
+    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429:
+        return BUSY_TEXT
+    if isinstance(error, httpx.TimeoutException):
+        return SLOW_TEXT
+    return ERROR_TEXT
 
 
 class Session:
@@ -218,9 +229,9 @@ class Session:
             await self.send(type="done", turn=turn)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as error:
             log.exception("Reply failed on turn %s", turn)
-            await self.send(type="error", turn=turn, message=ERROR_TEXT)
+            await self.send(type="error", turn=turn, message=error_text(error))
         finally:
             # Drop audio that is still being prepared, so none arrives after a barge in.
             for task in audio_tasks:

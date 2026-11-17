@@ -18,13 +18,14 @@ from app.prompts import system_prompt
 API = "https://generativelanguage.googleapis.com/v1beta/models"
 REFUSAL_TEXT = "Sorry, I can't help with that one."
 BLOCKED = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"}
+TRIES = 2  # a request that times out before any text is tried once more
 _client = None
 
 
 def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(timeout=httpx.Timeout(30, read=15))  # a stalled request fails fast
+        _client = httpx.AsyncClient(timeout=httpx.Timeout(10, read=8))  # a stalled request fails fast
     return _client
 
 
@@ -97,7 +98,15 @@ class ReplyExtractor:
                 elif text[i + 1] == "u":
                     if i + 6 > len(text):
                         break
-                    out.append(chr(int(text[i + 2:i + 6], 16)))
+                    code = int(text[i + 2:i + 6], 16)
+                    if 0xD800 <= code < 0xDC00:
+                        # The first half of a pair (an emoji, say). Wait for the second half.
+                        if i + 12 > len(text):
+                            break
+                        low = int(text[i + 8:i + 12], 16)
+                        code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
+                        i += 6
+                    out.append(chr(code))
                     i += 6
                 else:
                     out.append(_ESCAPES.get(text[i + 1], text[i + 1]))
@@ -109,23 +118,31 @@ class ReplyExtractor:
 async def gemini_reply(history: list[dict], language: Language = DEFAULT, name: str = "") -> AsyncIterator[dict]:
     url = f"{API}/{settings.gemini_model}:streamGenerateContent?alt=sse"
     headers = {"x-goog-api-key": settings.gemini_api_key}
-    extractor = ReplyExtractor()
+    body = request_body(history, language, name)
     spoke = False
-    async with get_client().stream("POST", url, headers=headers, json=request_body(history, language, name)) as response:
-        if response.status_code != 200:
-            await response.aread()
-            response.raise_for_status()
-        async for line in response.aiter_lines():
-            if not line.startswith("data:"):
-                continue
-            data = json.loads(line[5:])
-            candidate = (data.get("candidates") or [{}])[0]
-            for part in candidate.get("content", {}).get("parts", []):
-                found, text = extractor.feed(part.get("text", ""))
-                if found in LANGUAGES:
-                    yield {"type": "language", "language": found}
-                if text:
-                    spoke = True
-                    yield {"type": "text", "text": text}
+    for attempt in range(TRIES):
+        extractor = ReplyExtractor()
+        try:
+            async with get_client().stream("POST", url, headers=headers, json=body) as response:
+                if response.status_code != 200:
+                    await response.aread()
+                    response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = json.loads(line[5:])
+                    candidate = (data.get("candidates") or [{}])[0]
+                    for part in candidate.get("content", {}).get("parts", []):
+                        found, text = extractor.feed(part.get("text", ""))
+                        if found in LANGUAGES:
+                            yield {"type": "language", "language": found}
+                        if text:
+                            spoke = True
+                            yield {"type": "text", "text": text}
+            break
+        except httpx.TimeoutException:
+            # Gemini sometimes stalls. Ask once more, unless part of the reply was already said.
+            if spoke or attempt == TRIES - 1:
+                raise
     if not spoke:  # blocked, or nothing usable came back
         yield {"type": "text", "text": REFUSAL_TEXT}

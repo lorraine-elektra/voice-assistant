@@ -74,11 +74,20 @@ export class Player {
     const utterance = new SpeechSynthesisUtterance(text);
     if (this.lang) utterance.lang = this.lang;     // both set by the page from the pickers
     if (this.voice) utterance.voice = this.voice;
-    utterance.onstart = started;
+    let begun = false;
+    utterance.onstart = () => { begun = true; started(); };
     utterance.onend = finish;
-    utterance.onerror = finish;
+    // A language the browser has no voice for fails silently. Say it again with the browser's
+    // default voice (it reads with the wrong accent, but the user hears the answer).
+    utterance.onerror = (event) => {
+      const cancelled = event.error === "canceled" || event.error === "interrupted";
+      if (!begun && !cancelled && (this.lang || this.voice) && !retry) return this.speakWithBrowser(text, started, finish, true);
+      finish();
+    };
     // Some browsers never fire "end". Move on after a generous wait.
+    clearTimeout(this.watchdog);
     this.watchdog = setTimeout(finish, 6000 + text.length * 90);
+    if (retry) { utterance.lang = ""; utterance.voice = null; }
     speechSynthesis.speak(utterance);
   }
 }

@@ -1,4 +1,4 @@
-"""Gemini and Groq, both faked. No keys, no network."""
+"""Gemini, faked. No keys, no network."""
 import asyncio
 import json
 
@@ -118,3 +118,50 @@ def test_detected_language_reaches_the_browser(client, monkeypatch):
         ws.send_json({"type": "user_text", "text": "hello"})
         messages = read_until(ws, "done")
     assert {"type": "language", "turn": 1, "language": "tw"} in messages
+
+
+def test_emoji_written_as_an_escaped_pair_is_decoded(monkeypatch):
+    body = sse('{"detected_language": "en", "reply_text": "Hi \\ud83d', '\\ude00 there."}')
+    events, _ = run_gemini(monkeypatch, body)
+    assert "".join(e["text"] for e in events if e["type"] == "text") == "Hi \U0001F600 there."
+
+
+def test_a_stalled_request_is_tried_once_more(monkeypatch):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("stalled")
+        return httpx.Response(200, content=sse('{"detected_language": "en", "reply_text": "Hi."}'))
+
+    monkeypatch.setattr(settings, "gemini_api_key", "gm-test")
+    monkeypatch.setattr(settings, "gemini_model", "gemini-2.5-flash")
+    monkeypatch.setattr(gemini, "get_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    async def collect():
+        return [e async for e in gemini.gemini_reply([{"role": "user", "content": "hi"}])]
+
+    assert asyncio.run(collect())[-1] == {"type": "text", "text": "Hi."}
+    assert len(calls) == 2
+
+
+def failing_reply(client, monkeypatch, error):
+    async def fake(history, language, name=""):
+        raise error
+        yield
+
+    monkeypatch.setattr("app.session.reply_events", fake)
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "user_text", "text": "hello"})
+        return read_until(ws, "error")[-1]
+
+
+def test_the_free_limit_and_a_timeout_get_their_own_messages(client, monkeypatch):
+    request = httpx.Request("POST", gemini.API)
+    limit = httpx.HTTPStatusError("429", request=request, response=httpx.Response(429, request=request))
+    assert "limit" in failing_reply(client, monkeypatch, limit)["message"]
+    assert "too long" in failing_reply(client, monkeypatch, httpx.ReadTimeout("stalled"))["message"]
+    other = failing_reply(client, monkeypatch, RuntimeError("secret detail"))
+    assert other["turn"] == 1 and "secret" not in other["message"]
