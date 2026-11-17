@@ -165,7 +165,8 @@ class Session:
         await self.send(type="audio", turn=turn, index=index, audio=audio, mime=mime)
 
     async def reply(self, turn: int, user_text: str) -> None:
-        self.history.append({"role": "user", "content": user_text})
+        question = {"role": "user", "content": user_text}
+        self.history.append(question)
         splitter = SentenceSplitter()
         spoken: list[str] = []
         audio_tasks: list[asyncio.Task] = []
@@ -228,3 +229,7 @@ class Session:
             # Remember only what was actually said, even if the reply was cut short.
             if spoken:
                 self.history.append({"role": "assistant", "content": " ".join(spoken)})
+            elif self.history and self.history[-1] is question:
+                # Nothing was said (stopped or failed early). Forget the question too,
+                # or the next reply would answer it as well.
+                self.history.pop()

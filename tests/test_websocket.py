@@ -81,3 +81,26 @@ def test_stop_with_nothing_running_is_harmless(client):
         ws.send_json({"type": "stop"})
         ws.send_json({"type": "user_text", "text": "hi"})
         assert read_until(ws, "done")[0]["type"] == "status"
+
+
+def test_a_question_stopped_before_any_answer_is_forgotten(client, monkeypatch):
+    seen = []
+
+    async def fake(history, language, name=""):
+        seen.append([turn["content"] for turn in history])
+        if history[-1]["content"] == "first":
+            await asyncio.sleep(30)  # still thinking when the user presses Stop
+        yield {"type": "text", "text": "Fine."}
+
+    monkeypatch.setattr("app.session.reply_events", fake)
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "user_text", "text": "first"})
+        read_until(ws, "status")
+        ws.send_json({"type": "stop"})
+        read_until(ws, "cancelled")
+        ws.send_json({"type": "user_text", "text": "second"})
+        read_until(ws, "done")
+        ws.send_json({"type": "user_text", "text": "third"})
+        read_until(ws, "done")
+    assert seen[-2:] == [["second"], ["second", "Fine.", "third"]]
