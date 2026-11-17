@@ -1,38 +1,64 @@
-# Voice Assistant spec (draft)
+# Voice Assistant spec
 
-This is a draft. The owner reviews it and changes anything that is wrong before building starts.
+This describes what is built. If the code and this file disagree, tell the owner.
 
 ## Goal
-A voice assistant that feels fast and can be interrupted, deployed at a public URL, with a clear README and a short demo.
+A voice assistant that feels fast, can be interrupted, and can look things up on the web.
+It runs on the owner's machine. Deployment is a later step.
 
 ## Users and flow
-1. The user opens the web page and presses the mic button.
-2. The browser sends audio (or, in Phase 1, recognised text) to the backend over a WebSocket.
+1. The user opens the web page and presses the mic button, or types.
+2. The browser sends recognised text to the backend over a WebSocket. In Deepgram mode it sends audio and the backend returns the text.
 3. The backend sends the text to Claude and streams the reply back.
 4. The reply is cut into sentences. Each finished sentence is spoken as soon as it is ready.
-5. If the user starts talking while the assistant is speaking, the assistant stops and listens (barge in).
+5. If the question needs current information, Claude searches the web. The page shows a searching status and says a short filler line.
+6. If the user starts talking, types or presses Stop while the assistant is answering, the assistant stops and listens (barge in).
 
-## Phases
+The message format is in `docs/protocol.md`.
 
-### Phase 1: text brain, browser voice
-* FastAPI app with a `/health` route and a WebSocket route
-* Browser speech recognition for input and browser speech synthesis for output
-* Claude streaming, with replies cut into sentences
-* Barge in: a new message cancels the reply in progress
-* Mock mode so everything runs without keys
-* Tests for the sentence splitter, the mock reply and the WebSocket flow
+## What is built
 
-### Phase 2: real voice
-* Deepgram live speech to text
-* ElevenLabs text to speech, one request per sentence
-* Browser fallbacks if a key is missing
-* Needs: `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`
+### Text loop
+* FastAPI app with `/health`, the page at `/`, and a WebSocket at `/ws`
+* Claude streaming with the model from `ANTHROPIC_MODEL`
+* Conversation history kept in memory for the life of the connection only
+* Replies cut into sentences (handles abbreviations, decimals, missing punctuation)
+* Barge in: a new message or `stop` cancels the reply at once, and nothing from the old reply arrives afterwards
+* Mock mode (the default) so everything runs with no keys
+* System prompt: a general assistant that answers in one to three short spoken sentences, with no markdown, lists or emojis
 
-### Phase 3: ship it
-* Deploy on Railway with a public URL
-* Measure time to first spoken word and write it in the README. Initial goal is under 1.5 seconds, to be confirmed by measuring
-* Short demo clip and a README with a diagram
-* A small set of test conversations used as a regression check
+### Web lookup
+* Uses Anthropic's built in web search tool (`web_search_20250305`), which runs on Anthropic's side
+* Claude decides when to search. Small talk gets no search
+* A spoken "Let me look that up" and a `searching` status cover the wait
+* Spoken answers name the source in a few words. URLs are never spoken. Links are shown in the transcript
+* `WEB_SEARCH_MAX_USES` limits searches per reply
+* Barge in cancels a search in progress
+* A failed search is said plainly and the answer comes from what Claude already knows
+* Mock mode fakes a search, and a failing search, with canned results
+
+### Page
+* One page, plain HTML and JavaScript
+* Mic button, live transcript, and a status: idle, listening, thinking, searching, speaking
+* Browser speech recognition and browser speech synthesis by default
+* Barge in by voice using a microphone level monitor that ignores the assistant's own voice
+* Text box that always works, and is the fallback when speech recognition is not supported
+* Friendly messages for mic permission denied, connection lost (with automatic reconnect), backend errors, and empty or unclear speech
+* Works with the keyboard alone (Esc stops) and on a phone sized screen
+
+### Real voice
+* Deepgram live speech to text, audio streamed from the browser through the backend
+* ElevenLabs text to speech, one request per sentence, played in order
+* Barge in stops playback and drops audio still being prepared
+* A missing key means that piece falls back to the browser. The page shows the active modes
+* Keys stay on the backend
+* Time from end of speech to first spoken word is measured, shown in the page and logged. Goal: under 1.5 seconds without a search
+* Regression conversations in `tests/conversations.json`
+
+## Not built yet
+* Deploy to a public URL (Railway)
+* Short demo clip
+* Measured speed with the real services (needs the owner's keys)
 
 ## Out of scope for now
 * User accounts and login
@@ -40,11 +66,11 @@ A voice assistant that feels fast and can be interrupted, deployed at a public U
 * Phone calls
 
 ## Inputs the owner provides
-* `ANTHROPIC_API_KEY` (Phase 1 live testing)
-* `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` (Phase 2)
-* Railway account (Phase 3)
+* `ANTHROPIC_API_KEY` for real replies and web search
+* `DEEPGRAM_API_KEY` for Deepgram
+* `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for ElevenLabs
 * Her own signups and payments, handled by her
 
 ## Open questions
-* Which Claude model for replies? Default in `.env.example` is a fast one, change if quality matters more than speed.
-* Should the assistant have a persona or a fixed topic?
+* Which Claude model for replies? The default in `.env.example` is a fast one. Change it if quality matters more than speed.
+* Should the assistant have a persona or a fixed topic? For now it is a general assistant.

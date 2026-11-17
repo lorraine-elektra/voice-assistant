@@ -9,9 +9,9 @@ Full requirements live in `docs/spec.md`. If the code and the spec disagree, tel
 
 ## Stack
 * Python 3.11 or newer, FastAPI, WebSockets
-* Anthropic API for the replies (streaming)
-* Deepgram for live speech to text (Phase 2)
-* ElevenLabs for text to speech (Phase 2)
+* Anthropic API for the replies (streaming, with web search)
+* Deepgram for live speech to text (browser fallback)
+* ElevenLabs for text to speech (browser fallback)
 * Plain HTML and JavaScript frontend, no framework
 * pytest for tests
 
@@ -36,4 +36,4 @@ Full requirements live in `docs/spec.md`. If the code and the spec disagree, tel
 * At the end of a task, list what was done, what is left, and any inputs needed from the owner.
 
 ## Current phase
-Phase 1. See `docs/spec.md` for the phase list.
+Everything except deployment is built: text loop, web lookup, the page, Deepgram and ElevenLabs. See `docs/spec.md` for what is built and what is left.
