@@ -1,5 +1,5 @@
 // Speaks sentences one after another, in the order they were queued.
-// A sentence is spoken with ElevenLabs audio from the backend when there is some,
+// A sentence is spoken with Abena audio from the backend when there is some,
 // otherwise with the browser's own voice.
 export const canSpeak = "speechSynthesis" in window;
 const AUDIO_WAIT_MS = 8000; // how long to wait for a sentence's audio before giving up

@@ -16,6 +16,7 @@ from app.sentences import SentenceSplitter
 
 log = logging.getLogger("voice")
 ERROR_TEXT = "Sorry, something went wrong on my side. Please try again."
+ABENA_LIMIT_TEXT = "Abena could not hear that. Its free speech limit may be used up, so please type your message instead."
 PHRASE_FAILED_TEXT = "I could not hear that. Please try again."
 
 
@@ -98,16 +99,25 @@ class Session:
     async def hear_phrase(self, message: dict) -> None:
         """One recorded phrase from the browser. The words go back as a final transcript."""
         try:
-            if settings.stt_mode != "whisper":
-                raise RuntimeError("Whisper is not configured")
             audio = base64.b64decode(message["audio"])
             mime = str(message.get("mime") or "audio/wav")
             if self.http is None:
                 self.http = httpx.AsyncClient()
-            heard = await whisper.transcribe(self.http, audio, mime)
-            text = heard.text
-            if not heard.confident and settings.abena_mode:
-                text = await self.second_opinion(audio, mime) or text
+            if settings.stt_mode == "whisper":
+                heard = await whisper.transcribe(self.http, audio, mime)
+                text = heard.text
+                if not heard.confident and settings.abena_mode:
+                    text = await self.second_opinion(audio, mime) or text
+            elif settings.abena_mode and self.language.id in abena.LISTENS_FOR:
+                # No Whisper key: Abena listens for Twi and Pidgin. Its free use is limited.
+                try:
+                    text = await abena.transcribe(self.http, audio, mime, self.language.id)
+                except httpx.HTTPStatusError as error:
+                    log.warning("Abena could not transcribe: %s", error)
+                    await self.send(type="error", message=ABENA_LIMIT_TEXT)
+                    return
+            else:
+                raise RuntimeError("No speech to text service for this language")
             await self.send(type="transcript", text=text, final=True)
         except asyncio.CancelledError:
             raise

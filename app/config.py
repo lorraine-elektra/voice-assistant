@@ -43,8 +43,9 @@ class Settings:
 
     @property
     def abena_mode(self) -> bool:
-        """Abena speaks Twi and Pidgin when we have its key."""
-        return not self.mock_mode and bool(self.abena_api_key)
+        """Abena speaks Twi and Pidgin whenever we are not in mock mode. Its playground API
+        works without a key, so ABENA_API_KEY is optional and only sent when set."""
+        return not self.mock_mode
 
     def abena_voice(self, language_id: str, choice: str = "") -> str:
         """The Abena voice for a language and the voice picked on the page ("" if none)."""
@@ -55,7 +56,7 @@ def load_settings() -> Settings:
     return Settings(
         mock_mode=_env("MOCK_MODE", "true").lower() in ("1", "true", "yes"),
         gemini_api_key=_env("GEMINI_API_KEY"),
-        gemini_model=_env("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_model=_env("GEMINI_MODEL", "gemini-3.5-flash"),
         groq_api_key=_env("GROQ_API_KEY"),
         groq_model=_env("GROQ_MODEL", "whisper-large-v3"),
         abena_api_key=_env("ABENA_API_KEY"),

@@ -24,7 +24,7 @@ _client = None
 def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(timeout=30)
+        _client = httpx.AsyncClient(timeout=httpx.Timeout(30, read=15))  # a stalled request fails fast
     return _client
 
 

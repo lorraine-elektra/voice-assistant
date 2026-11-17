@@ -2,7 +2,6 @@
 import { Player, canSpeak } from "./speech-out.js";
 import { Choices } from "./choices.js";
 import { BrowserListener, recognitionSupported } from "./speech-in.js";
-import { DeepgramListener } from "./speech-in-deepgram.js";
 import { WhisperListener } from "./speech-in-whisper.js";
 import { Mic, isPhone } from "./mic.js";
 import { robot, restyle } from "./robot.js";
@@ -31,8 +30,9 @@ const state = {
   turn: 0,           // counts user messages, exactly like the backend does
   activeTurn: null,  // the turn whose reply we accept. Anything else is stale.
   brain: "?",
-  stt: "browser",    // who turns speech into text: "browser", "deepgram" or "whisper"
-  tts: "browser",    // who speaks: "browser" or "elevenlabs"
+  stt: "browser",    // who turns speech into text: "browser" or "whisper"
+  tts: "browser",    // who speaks Twi and Pidgin: "browser" or "abena"
+  abena: false,      // Abena is on: it speaks, and listens for, Twi and Pidgin
 };
 let socket;
 let retries = 0;
@@ -40,7 +40,7 @@ let pendingBubble = null;       // live words while the user is still talking
 const replyBubbles = new Map(); // turn -> the assistant's bubble
 const audioWaiters = new Map(); // sentence index -> function that delivers its audio
 let timing = null;              // measures end of speech to first spoken word
-let listener = null;            // BrowserListener or DeepgramListener, see chooseListener
+let listener = null;            // BrowserListener or WhisperListener, see chooseListener
 
 const player = new Player({
   onStart: (sentence) => { markLive(sentence); reportLatency(); sync(); },
@@ -52,13 +52,6 @@ const choices = new Choices({
 });
 
 // ---------- setup: name, voice type, language, voice ----------
-
-function recall(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-function remember(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* not remembered in a private window */ }
-}
 
 const assistantName = () => els.name.value.trim() || "Assistant";
 const robots = {
@@ -83,20 +76,19 @@ function showSetup(open) {
   els.chat.hidden = open;
   els.openSetup.hidden = open;
   if (open) {
-    els.start.textContent = recall("setup-done") ? "Save changes" : "Start talking";
+    els.start.textContent = setupDone ? "Save changes" : "Start talking";
     els.name.focus();
   } else {
     els.text.focus();
   }
 }
 
-els.name.value = recall("name") || "";
+let setupDone = false; // nothing is stored, so every refresh starts at the setup screen
 els.name.addEventListener("input", showAssistant);
 els.openSetup.addEventListener("click", () => showSetup(true));
 els.setupForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  remember("name", els.name.value.trim());
-  remember("setup-done", "1");
+  setupDone = true;
   showAssistant();
   applyChoices();
   showSetup(false);
@@ -118,12 +110,16 @@ const listenerHandlers = {
   },
 };
 
+// Who listens for the current language: the backend (Whisper, or Abena for Twi and Pidgin when
+// there is no Whisper key) or the browser's own recognition.
+const LOCAL = ["tw", "pcm-GH", "pcm-NG"];
+const backendListens = () => state.stt === "whisper" || (state.abena && LOCAL.includes(choices.language.id));
+let listenerKind = null;
+
 function chooseListener() {
   listener?.setActive(false);
-  if (state.stt === "deepgram") {
-    const sendBytes = (chunk) => socket.readyState === WebSocket.OPEN && socket.send(chunk);
-    listener = new DeepgramListener({ mic, sendJson: send, sendBytes, ...listenerHandlers });
-  } else if (state.stt === "whisper") {
+  listenerKind = backendListens() ? "backend" : "browser";
+  if (listenerKind === "backend") {
     listener = new WhisperListener({ mic, sendJson: send, ...listenerHandlers });
   } else {
     mic.onChunk = null;
@@ -169,8 +165,8 @@ function sync() {
 function showModes() {
   const modes = [
     ["Brain", state.brain],
-    ["Listening", listener ? state.stt : "typing only"],
-    ["Voice", state.tts === "elevenlabs" || canSpeak ? state.tts : "text only"],
+    ["Listening", listener ? (listenerKind === "browser" ? "browser" : state.stt === "whisper" ? "whisper" : "abena") : "typing only"],
+    ["Voice", state.tts === "abena" ? "browser + abena" : canSpeak ? "browser" : "text only"],
   ];
   els.modes.replaceChildren(...modes.map(([name, value]) => {
     const item = document.createElement("li");
@@ -302,18 +298,26 @@ function reportLatency() {
 }
 
 // The language or voice picker changed: tell the browser voice, the backend and the listener.
-// The backend must hear it first, so a new Deepgram connection opens in the new language.
+// The backend must hear it first, so it speaks the next reply with the right voice.
 function applyChoices() {
   player.lang = choices.tag;
   player.voice = choices.browserVoice;
   send({ ...choices.message, name: els.name.value.trim() });
   showAssistant();
+  // A language can need a different listener (Twi needs Abena, English can use the browser).
+  if (listener && listenerKind !== (backendListens() ? "backend" : "browser")) {
+    const wasOn = state.micOn;
+    if (wasOn) setMic(false);
+    chooseListener();
+    showModes();
+    if (wasOn) setMic(true);
+  }
   listener?.setLanguage(choices.tag);
   sync();
 }
 
 function onReady(message) {
-  Object.assign(state, { brain: message.brain, stt: message.stt, tts: message.tts });
+  Object.assign(state, { brain: message.brain, stt: message.stt, tts: message.tts, abena: Boolean(message.abena) });
   choices.setOptions(message);
   chooseListener();
   applyChoices();
@@ -321,17 +325,8 @@ function onReady(message) {
   sync();
 }
 
-function onSttFailed(message) {
-  showBanner(message.message);
-  state.stt = "browser"; // fall back to the browser's own speech recognition
-  chooseListener();
-  showModes();
-  sync();
-}
-
 function onMessage(message) {
   if (message.type === "ready") return onReady(message);
-  if (message.type === "stt_failed") return onSttFailed(message);
   if (message.type === "transcript") return listener?.onTranscript?.(message);
   if (message.type === "error" && message.turn === undefined) return showBanner(message.message);
   if (message.turn !== state.activeTurn) return; // from a reply we already cancelled
@@ -352,7 +347,7 @@ function onMessage(message) {
     words.append(sentence);
     els.transcript.scrollTop = els.transcript.scrollHeight;
     // When the backend makes audio for this sentence, it follows in its own message.
-    const audio = (message.audio_expected ?? state.tts === "elevenlabs")
+    const audio = message.audio_expected
       ? new Promise((deliver) => audioWaiters.set(message.index, deliver))
       : null;
     player.enqueue(message.text, audio, sentence);
@@ -399,15 +394,15 @@ async function setMic(on) {
   }
   hideBanner();
   interrupt(true); // pressing the mic while it talks also counts as barge in
-  const deepgram = state.stt !== "browser"; // the backend does the listening, so we need raw audio
+  const rawAudio = backendListens(); // then we need raw audio to record phrases
   // With browser recognition, phones cannot share the mic with the level monitor.
-  if (isPhone && !deepgram) return;
+  if (isPhone && !rawAudio) return;
   try {
-    await mic.open({ rawAudio: deepgram });
+    await mic.open({ rawAudio });
     sync();
   } catch {
-    // Browser recognition reports a denied permission by itself. Deepgram cannot.
-    if (deepgram) {
+    // Browser recognition reports a denied permission by itself. Our own recorder cannot.
+    if (rawAudio) {
       showBanner(MIC_DENIED);
       setMic(false);
     }
@@ -472,5 +467,5 @@ chooseListener();
 showModes();
 showAssistant();
 sync();
-showSetup(recall("setup-done") !== "1");
+showSetup(true);
 connect();

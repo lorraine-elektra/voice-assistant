@@ -47,3 +47,9 @@ def test_page_has_the_language_and_voice_pickers(client):
     assert 'id="language"' in page and 'id="voice"' in page
     # The page sends the choice to the backend, see docs/protocol.md.
     assert '"settings"' in client.get("/static/choices.js").text
+
+
+def test_page_stores_nothing_in_the_browser(client):
+    for name in ("app.js", "choices.js", "mic.js", "speech-out.js", "robot.js"):
+        script = client.get(f"/static/{name}").text
+        assert "localStorage" not in script and "sessionStorage" not in script

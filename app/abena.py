@@ -11,12 +11,15 @@ TTS_API = "https://abena.mobobi.com/playground/api/v1/tts/synthesize/"
 ASR_API = "https://abena.mobobi.com/playground/api/v1/asr/transcribe/"
 MAX_CHARS = 500  # the longest text Abena speaks in one request
 MIME = "audio/wav"
+# Languages where Abena listens for the user when there is no Whisper (Groq) key.
+LISTENS_FOR = ("tw", "pcm-GH", "pcm-NG")
 # Which Abena recogniser to use for each of our language ids.
 ASR_LANGUAGES = {"tw": "twi-en", "en": "en", "pcm-GH": "gpe", "pcm-NG": "pcm"}
 
 
 def _headers() -> dict:
-    return {"Authorization": f"Bearer {settings.abena_api_key}"}
+    # The playground API needs no key. Send one only if the owner set it.
+    return {"Authorization": f"Bearer {settings.abena_api_key}"} if settings.abena_api_key else {}
 
 
 async def synthesize(http: httpx.AsyncClient, text: str, voice: str) -> bytes:

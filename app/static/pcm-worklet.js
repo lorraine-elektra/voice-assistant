@@ -1,5 +1,5 @@
 // Runs on the audio thread. Collects microphone samples into small chunks of raw
-// 16 bit audio (the format Deepgram is told to expect) and posts them to the page.
+// 16 bit audio (the format the phrase recorder turns into WAV) and posts them to the page.
 const CHUNK = 1600; // samples per chunk: a tenth of a second at 16 kHz
 
 class PcmSender extends AudioWorkletProcessor {

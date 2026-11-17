@@ -1,15 +1,8 @@
-// The language and voice pickers. The choices are remembered in this browser.
-// The list of languages, and of ElevenLabs voices, comes from the backend's `ready` message.
+// The language and voice pickers. Nothing is stored: a refresh starts from the defaults.
+// The list of languages, and of Abena voices, comes from the backend's `ready` message.
 const canSpeak = "speechSynthesis" in window;
+const LOCAL = new Set(["tw", "pcm-GH", "pcm-NG"]); // languages only Abena speaks well
 const FALLBACK = { id: "en", name: "English", browser: "en-US" };
-
-function recall(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-
-function remember(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* private window: just not remembered */ }
-}
 
 const primary = (tag) => tag.toLowerCase().split("-")[0];
 
@@ -29,24 +22,19 @@ export class Choices {
     this.els = { language: languageEl, voice: voiceEl, help: helpEl };
     this.genderEls = [...genderEls];
     this.languages = [FALLBACK];
-    this.serverVoices = [];  // ElevenLabs voice names. Empty means the browser speaks.
     this.abenaVoices = {};   // language id -> Abena voices, for Twi and Pidgin
-    const saved = recall("gender");
     this.genderEls.forEach((radio) => {
-      radio.checked = radio.value === (saved || "woman");
+      radio.checked = radio.value === "woman";
       radio.addEventListener("change", () => {
-        remember("gender", this.gender);
         this.fillVoices();
         onChange();
       });
     });
     languageEl.addEventListener("change", () => {
-      remember("language", languageEl.value);
       this.fillVoices();
       onChange();
     });
     voiceEl.addEventListener("change", () => {
-      remember(this.voiceKey, voiceEl.value);
       onChange();
     });
     // Browsers load their voices late, so fill the list again when they arrive.
@@ -55,9 +43,8 @@ export class Choices {
   }
 
   // Called with the backend's `ready` message.
-  setOptions({ languages, voices, abena_voices }) {
+  setOptions({ languages, abena_voices }) {
     if (languages?.length) this.languages = languages;
-    this.serverVoices = voices || [];
     this.abenaVoices = abena_voices || {};
     this.fillLanguages();
   }
@@ -82,7 +69,7 @@ export class Choices {
   // The browser voice to speak with, or null for the browser's default.
   get browserVoice() {
     if (!canSpeak) return null;
-    const name = this.sendsVoice ? recall(`voice:${this.language.id}`) : this.els.voice.value;
+    const name = this.sendsVoice ? "" : this.els.voice.value;
     return speechSynthesis.getVoices().find((voice) => voice.name === name) || null;
   }
 
@@ -94,12 +81,11 @@ export class Choices {
 
   // True when the backend, not the browser, needs to know which voice was picked.
   get sendsVoice() {
-    return Boolean(this.abenaVoices[this.language.id]) || this.serverVoices.length > 0 || this.language.id === "auto";
+    return Boolean(this.abenaVoices[this.language.id]) || this.language.id === "auto";
   }
 
   get voiceKey() {
-    if (this.abenaVoices[this.language.id]) return `voice:abena:${this.language.id}`;
-    return this.serverVoices.length ? "voice:elevenlabs" : `voice:${this.language.id}`;
+    return this.abenaVoices[this.language.id] ? `voice:abena:${this.language.id}` : `voice:${this.language.id}`;
   }
 
   // In automatic mode the reply language is only known once Gemini says it. This finds the
@@ -118,14 +104,14 @@ export class Choices {
   }
 
   fillLanguages() {
-    const wanted = recall("language") || this.els.language.value;
+    const wanted = this.els.language.value; // keep the pick when the list is rebuilt
     this.els.language.replaceChildren(...this.languages.map((lang) => new Option(lang.name, lang.id)));
     if (this.languages.some((lang) => lang.id === wanted)) this.els.language.value = wanted;
     this.fillVoices();
   }
 
-  // Lists only the voices of the picked gender. If we cannot tell (ElevenLabs gives names only,
-  // some browsers give odd names), everything is listed and the help line says so.
+  // Lists only the voices of the picked gender. If we cannot tell (some browsers give odd
+  // names), everything is listed and the help line says so.
   fillVoices() {
     const abena = this.abenaVoices[this.language.id];
     const kind = this.gender;
@@ -135,18 +121,17 @@ export class Choices {
       const list = mine.length ? mine : abena;
       if (!mine.length) help = `No ${kind} voice for ${this.language.name}. Showing all voices.`;
       options = list.map((v) => new Option(v.note ? `${v.name} (${v.note})` : v.name, v.name));
-    } else if (this.serverVoices.length) {
-      const mine = this.serverVoices.filter((name) => genderOf(name) === kind);
-      options = (mine.length ? mine : this.serverVoices).map((name) => new Option(name, name));
-      if (!mine.length) help = "These voices do not say if they are a woman or a man, so all are shown.";
     } else if (this.language.id === "auto") {
       options = [new Option(`Automatic ${kind}`, kind)];
       help = "The voice follows the language the reply is in.";
     } else {
       [options, help] = this.browserOptions(kind);
+      if (LOCAL.has(this.language.id)) {
+        help = "Abena voices are not available, so this browser's voices are shown. Turn off MOCK_MODE and restart the server.";
+      }
     }
+    const wanted = this.els.voice.value; // keep the pick when the list is rebuilt
     this.els.voice.replaceChildren(...options);
-    const wanted = recall(this.voiceKey);
     if (options.some((option) => option.value === wanted)) this.els.voice.value = wanted;
     this.els.voice.disabled = options.length < 2;
     if (this.els.help) this.els.help.textContent = help;

@@ -3,15 +3,15 @@
 Read this file at the start of every session. It is the memory of the project.
 
 ## What this project is
-A real time voice assistant. The user speaks into the browser, the backend turns speech into text, Claude replies in a streamed answer, and the reply is spoken back sentence by sentence. The user can interrupt it mid sentence (barge in).
+A real time voice assistant. The user speaks into the browser, the backend turns speech into text, Gemini replies in a streamed answer, and the reply is spoken back sentence by sentence. The user can interrupt it mid sentence (barge in).
 
 Full requirements live in `docs/spec.md`. If the code and the spec disagree, tell the owner and fix the code unless told otherwise.
 
 ## Stack
 * Python 3.11 or newer, FastAPI, WebSockets
-* Anthropic API for the replies (streaming, with web search)
-* Deepgram for live speech to text (browser fallback)
-* ElevenLabs for text to speech (browser fallback)
+* Gemini API for the replies and language detection (streaming JSON)
+* Groq Whisper for speech to text (browser fallback), Abena AI as a second opinion for Twi
+* Abena AI voices for Twi and Pidgin text to speech, browser voices for the rest
 * Plain HTML and JavaScript frontend, no framework
 * pytest for tests
 
@@ -36,4 +36,4 @@ Full requirements live in `docs/spec.md`. If the code and the spec disagree, tel
 * At the end of a task, list what was done, what is left, and any inputs needed from the owner.
 
 ## Current phase
-Everything except deployment is built: text loop, web lookup, the page, Deepgram and ElevenLabs. See `docs/spec.md` for what is built and what is left.
+Everything except deployment is built: text loop, the page, Groq Whisper, Gemini and Abena. Web search is not available with Gemini yet. See `docs/spec.md` for what is built and what is left.

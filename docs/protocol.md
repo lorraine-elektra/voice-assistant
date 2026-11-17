@@ -12,30 +12,26 @@ and stamps every reply message with its turn, so the browser can ignore anything
 | --- | --- | --- |
 | `user_text` | `text` | What the user said or typed. Starts a new turn. If a reply is still in progress it is cancelled first (barge in). |
 | `stop` | | Cancel the reply in progress. |
-| `settings` | `language`, `voice`, `name` | The language, voice and assistant name picked on the page. `name` is optional, at most 30 characters, and goes into the prompt so the assistant answers to it. `language` is an `id` from `ready`. `voice` is a name from `ready` (an Abena or ElevenLabs voice), `woman` or `man` (with the automatic language), or empty. Applies from the next reply. An unknown language gets an `error` and changes nothing. An unknown voice means the default voice. Send it before `audio_start`, so Deepgram listens in the right language. |
+| `settings` | `language`, `voice`, `name` | The language, voice and assistant name picked on the page. `name` is optional, at most 30 characters, and goes into the prompt so the assistant answers to it. `language` is an `id` from `ready`. `voice` is a name from `ready` (an Abena voice), `woman` or `man` (with the automatic language), or empty. Applies from the next reply. An unknown language gets an `error` and changes nothing. An unknown voice means the default voice. |
 | `phrase` | `audio`, `mime` | Whisper mode only. One finished phrase the user spoke, as base64 WAV (16 kHz, mono, 16 bit). The page finds the start and end of the phrase itself. The backend answers with a final `transcript`, or an `error` without a `turn` if it could not hear it. |
-| `audio_start` | `sample_rate` | Deepgram mode only. Open the speech to text connection. Audio follows as binary messages. |
-| `audio_stop` | | Close the speech to text connection. |
 | `latency` | `turn`, `ms`, `searched` | Measured time from end of speech to first spoken word. The backend logs it. |
 
-**Binary messages** are microphone audio: raw 16 bit mono samples at the `sample_rate`
-given in `audio_start`. They are ignored unless Deepgram is connected.
+**Binary messages** are not used. The backend ignores them.
 
 ## Backend to browser
 
 | type | fields | meaning |
 | --- | --- | --- |
-| `ready` | `brain`, `stt`, `tts`, `languages`, `voices` | Sent once after connecting. Says which mode is active: `brain` is `mock` or `gemini`, `stt` is `browser`, `deepgram` or `whisper`, `tts` is `browser` or `elevenlabs`. `abena` is true when Abena speaks Twi and Pidgin. `languages` is the list to pick from, each `{"id", "name", "browser"}` where `browser` is the tag for the browser's own speech recognition and voices. `abena_voices` maps a language id (`tw`, `pcm-GH`, `pcm-NG`) to its Abena voices, each `{"name", "gender", "note"}`, empty without an Abena key. `voices` is the list of ElevenLabs voice names, empty when the browser speaks. Never contains a key or a voice id. |
+| `ready` | `brain`, `stt`, `tts`, `abena`, `languages`, `abena_voices` | Sent once after connecting. Says which mode is active: `brain` is `mock` or `gemini`, `stt` is `browser` or `whisper`, `tts` is `browser` or `abena`. `abena` is true when Abena speaks Twi and Pidgin. `languages` is the list to pick from, each `{"id", "name", "browser"}` where `browser` is the tag for the browser's own speech recognition and voices. `abena_voices` maps a language id (`tw`, `pcm-GH`, `pcm-NG`) to its Abena voices, each `{"name", "gender", "note"}`, empty without an Abena key. Never contains a key or a voice id. |
 | `status` | `turn`, `state` | What the backend is doing. `state` is `thinking` or `searching` (a web search is running). |
 | `language` | `turn`, `language` | Gemini mode only. The language the reply is written in, an `id` from `ready`. Sent before the first `sentence` of the turn. |
 | `sentence` | `turn`, `index`, `text`, `audio_expected` | One finished sentence of the reply. `index` counts from 0 inside the turn. Speak them in order. `audio_expected` is true when an `audio` message for this sentence follows, so the browser waits for it. |
-| `audio` | `turn`, `index`, `audio`, `mime` | ElevenLabs or Abena. The sound of the sentence with the same `index`, as base64. `mime` is `audio/mpeg` (ElevenLabs) or `audio/wav` (Abena, used for Twi and Pidgin). `audio` is `null` if it could not be made, and then the browser speaks that sentence itself. May arrive out of order. Play by `index`. |
+| `audio` | `turn`, `index`, `audio`, `mime` | Abena only. The sound of the sentence with the same `index`, as base64. `mime` is `audio/wav`. `audio` is `null` if it could not be made, and then the browser speaks that sentence itself. May arrive out of order. Play by `index`. |
 | `search_failed` | `turn` | The web search did not work. The reply carries on from what the assistant already knows. |
 | `sources` | `turn`, `sources` | Web pages the answer used, as a list of `{"title", "url"}`. Show them as links. Never speak them. |
 | `done` | `turn` | The reply is complete. All its audio has been sent. |
 | `cancelled` | `turn` | The reply was cancelled. Nothing more arrives for this turn. |
-| `transcript` | `text`, `final` | Deepgram and Whisper modes. (Whisper sends only final ones.) Words heard so far. When `final` is true the phrase is finished and the browser sends it back as `user_text`. |
-| `stt_failed` | `message` | Deepgram could not be used. The browser falls back to its own speech recognition. |
+| `transcript` | `text`, `final` | Whisper mode only, and only final ones. The words heard in a phrase. When `final` is true the phrase is finished and the browser sends it back as `user_text`. |
 | `error` | `message`, maybe `turn` | Something went wrong. `message` is safe to show to the user. |
 
 ## Barge in rule
@@ -70,17 +66,17 @@ backend  {"type": "sources", "turn": 2, "sources": [{"title": "...", "url": "htt
 backend  {"type": "done", "turn": 2}
 ```
 
-## Example with real voice (Deepgram and ElevenLabs)
+## Example with real voice (Groq Whisper, Gemini and Abena)
 
 ```
-browser  {"type": "audio_start", "sample_rate": 16000}
-browser  <binary audio> <binary audio> ...
-backend  {"type": "transcript", "text": "hello", "final": false}
-backend  {"type": "transcript", "text": "Hello there.", "final": true}
-browser  {"type": "user_text", "text": "Hello there."}
+browser  {"type": "settings", "language": "auto", "voice": "woman"}
+browser  {"type": "phrase", "mime": "audio/wav", "audio": "<base64 wav>"}
+backend  {"type": "transcript", "text": "Ɛte sɛn?", "final": true}
+browser  {"type": "user_text", "text": "Ɛte sɛn?"}
 backend  {"type": "status", "turn": 1, "state": "thinking"}
-backend  {"type": "sentence", "turn": 1, "index": 0, "text": "Hi!"}
-backend  {"type": "audio", "turn": 1, "index": 0, "audio": "<base64 mp3>"}
+backend  {"type": "language", "turn": 1, "language": "tw"}
+backend  {"type": "sentence", "turn": 1, "index": 0, "text": "Me ho yɛ.", "audio_expected": true}
+backend  {"type": "audio", "turn": 1, "index": 0, "audio": "<base64 wav>", "mime": "audio/wav"}
 backend  {"type": "done", "turn": 1}
-browser  {"type": "latency", "turn": 1, "ms": 900, "searched": false}
+browser  {"type": "latency", "turn": 1, "ms": 1400, "searched": false}
 ```
