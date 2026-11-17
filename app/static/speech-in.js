@@ -7,6 +7,7 @@ const ERRORS = {
   "service-not-allowed": "This browser blocked speech recognition. You can type instead.",
   "audio-capture": "No microphone was found. Plug one in, or type instead.",
   "network": "The browser's speech service could not be reached. You can type instead.",
+  "language-not-supported": "This browser cannot listen in that language. You can type instead, or pick another language.",
 };
 
 export class BrowserListener {
@@ -24,11 +25,18 @@ export class BrowserListener {
     if (!active && this.running) this.recognition.abort();
   }
 
+  // tag: the language to listen for, such as "fr-FR". Takes effect at once.
+  setLanguage(tag) {
+    if (tag === this.lang) return;
+    this.lang = tag;
+    if (this.running) this.recognition.abort(); // it starts again by itself, in the new language
+  }
+
   begin() {
     const recognition = new Recognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
+    recognition.lang = this.lang || navigator.language || "en-US";
     recognition.onresult = (event) => this.onResult(event);
     recognition.onerror = (event) => this.onError(event.error);
     recognition.onend = () => {

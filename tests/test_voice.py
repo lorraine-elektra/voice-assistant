@@ -25,13 +25,14 @@ def voice_keys(monkeypatch):
 
 def test_no_keys_means_browser_voice(client):
     with client.websocket_connect("/ws") as ws:
-        assert ws.receive_json() == {"type": "ready", "brain": "mock", "stt": "browser", "tts": "browser"}
+        ready = ws.receive_json()
+    assert (ready["brain"], ready["stt"], ready["tts"], ready["voices"]) == ("mock", "browser", "browser", [])
 
 
 def test_keys_switch_on_real_voice_but_never_reach_the_browser(client, voice_keys):
     with client.websocket_connect("/ws") as ws:
         ready = ws.receive_json()
-    assert ready == {"type": "ready", "brain": "mock", "stt": "deepgram", "tts": "elevenlabs"}
+    assert (ready["brain"], ready["stt"], ready["tts"]) == ("mock", "deepgram", "elevenlabs")
     assert "test" not in json.dumps(ready)
 
 
@@ -52,7 +53,7 @@ def test_synthesize_sends_one_sentence_with_the_key_in_a_header(voice_keys):
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-            return await tts.synthesize(http, "Hello there.")
+            return await tts.synthesize(http, "Hello there.", "voice-test")
 
     assert asyncio.run(run()) == b"mp3-bytes"
     assert seen == {
@@ -63,7 +64,7 @@ def test_synthesize_sends_one_sentence_with_the_key_in_a_header(voice_keys):
 
 
 def test_every_sentence_gets_audio_before_done(client, voice_keys, monkeypatch):
-    async def fake(http, text):
+    async def fake(http, text, voice_id):
         return text.encode()
 
     monkeypatch.setattr(tts, "synthesize", fake)
@@ -77,7 +78,7 @@ def test_every_sentence_gets_audio_before_done(client, voice_keys, monkeypatch):
 
 
 def test_failed_audio_falls_back_to_the_browser_voice(client, voice_keys, monkeypatch):
-    async def broken(http, text):
+    async def broken(http, text, voice_id):
         raise httpx.ConnectError("ElevenLabs is down")
 
     monkeypatch.setattr(tts, "synthesize", broken)
@@ -90,7 +91,7 @@ def test_failed_audio_falls_back_to_the_browser_voice(client, voice_keys, monkey
 
 
 def test_barge_in_drops_audio_still_being_prepared(client, voice_keys, monkeypatch):
-    async def slow(http, text):
+    async def slow(http, text, voice_id):
         await asyncio.sleep(30)
 
     monkeypatch.setattr(tts, "synthesize", slow)

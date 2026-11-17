@@ -22,6 +22,14 @@ export class DeepgramListener {
     }
   }
 
+  // The backend already knows the new language (the page sends `settings` first).
+  // Closing the connection makes the next setActive open a fresh one in that language.
+  setLanguage(tag) {
+    if (tag === this.lang) return;
+    this.lang = tag;
+    this.reset(true);
+  }
+
   // After a barge in: send the moment of audio from just before it was detected,
   // so the first word the user said is not lost.
   sendPreroll() {

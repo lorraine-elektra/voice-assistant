@@ -14,5 +14,7 @@ the source in a few words, for example "according to the BBC". Never read out a 
 address, because the app shows the links on screen. If a search fails, say plainly that \
 you could not look it up, then answer from what you already know."""
 
-# Spoken straight away when a search starts, so there is no long silence.
-SEARCH_FILLER = "Let me look that up."
+
+def system_prompt(language) -> str:
+    """The prompt plus the language the listener picked on the page."""
+    return f"{SYSTEM_PROMPT}\n\nThe listener chose a language on the page. {language.instruction}"

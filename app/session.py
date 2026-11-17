@@ -11,7 +11,7 @@ from fastapi import WebSocket
 from app import tts
 from app.brain import reply_events
 from app.config import settings
-from app.prompts import SEARCH_FILLER
+from app.languages import DEFAULT, LANGUAGES, for_browser
 from app.sentences import SentenceSplitter
 from app.stt import DeepgramRelay
 
@@ -25,6 +25,10 @@ class Session:
         self.ws = websocket
         self.history: list[dict] = []  # lives only as long as the connection
         self.turn = 0
+        self.language = DEFAULT  # both set by the `settings` message
+        self.voice = ""
+        self.language = DEFAULT  # both set by the `settings` message
+        self.voice = ""
         self.reply_task: asyncio.Task | None = None
         self.relay: DeepgramRelay | None = None
         self.http: httpx.AsyncClient | None = None  # reused for every ElevenLabs request
@@ -36,7 +40,10 @@ class Session:
 
     async def run(self) -> None:
         await self.send(
-            type="ready", brain=settings.brain_mode, stt=settings.stt_mode, tts=settings.tts_mode
+            type="ready", brain=settings.brain_mode, stt=settings.stt_mode, tts=settings.tts_mode,
+            languages=for_browser(),
+            # Names only. The ids stay on the backend.
+            voices=list(settings.voices) if settings.tts_mode == "elevenlabs" else [],
         )
         try:
             while True:
@@ -71,6 +78,13 @@ class Session:
             self.reply_task = asyncio.create_task(self.reply(self.turn, text))
         elif kind == "stop":
             await self.cancel_reply()
+        elif kind == "settings":
+            language = LANGUAGES.get(message.get("language"))
+            if language is None:
+                await self.send(type="error", message="That language is not available.")
+                return
+            self.language = language
+            self.voice = str(message.get("voice") or "")
         elif kind == "audio_start":
             await self.start_listening(message.get("sample_rate"))
         elif kind == "audio_stop":
@@ -91,7 +105,7 @@ class Session:
             if settings.stt_mode != "deepgram":
                 raise RuntimeError("Deepgram is not configured")
             relay = DeepgramRelay(self.on_transcript, self.on_stt_closed)
-            await relay.start(int(sample_rate))
+            await relay.start(int(sample_rate), self.language.deepgram)
             self.relay = relay
         except Exception as error:
             log.warning("Could not start Deepgram: %s", error)
@@ -130,7 +144,7 @@ class Session:
         try:
             if self.http is None:
                 self.http = httpx.AsyncClient()
-            audio = base64.b64encode(await tts.synthesize(self.http, text)).decode()
+            audio = base64.b64encode(await tts.synthesize(self.http, text, settings.voice_id(self.voice))).decode()
         except Exception as error:
             log.warning("ElevenLabs failed for a sentence, the browser will speak it: %s", error)
             audio = None
@@ -142,6 +156,7 @@ class Session:
         spoken: list[str] = []
         audio_tasks: list[asyncio.Task] = []
         started = time.monotonic()
+        language = self.language  # a change mid reply waits for the next reply
 
         async def say(sentence: str) -> None:
             index = len(spoken)
@@ -157,7 +172,7 @@ class Session:
         try:
             await self.send(type="status", turn=turn, state="thinking")
             searched = False
-            async for event in reply_events(self.history):
+            async for event in reply_events(self.history, language):
                 kind = event["type"]
                 if kind == "text":
                     for sentence in splitter.feed(event["text"]):
@@ -167,7 +182,7 @@ class Session:
                         await say(sentence)
                     await self.send(type="status", turn=turn, state="searching")
                     if not searched:  # fill the silence, once per reply
-                        await say(SEARCH_FILLER)
+                        await say(language.filler)
                     searched = True
                 elif kind == "search_done":
                     await self.send(type="status", turn=turn, state="thinking")

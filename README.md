@@ -78,7 +78,7 @@ Each piece falls back by itself if its key is missing:
 | --- | --- | --- |
 | Replies | Claude, with web search (`ANTHROPIC_API_KEY`) | Canned mock replies |
 | Listening | Deepgram (`DEEPGRAM_API_KEY`) | Browser speech recognition |
-| Voice | ElevenLabs (`ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`) | Browser speech synthesis |
+| Voice | ElevenLabs (`ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`, plus optional `ELEVENLABS_VOICES` for a list to pick from) | Browser speech synthesis |
 
 Keys stay on the backend. The browser is only told the mode names.
 

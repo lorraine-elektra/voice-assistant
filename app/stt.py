@@ -17,9 +17,10 @@ API = "wss://api.deepgram.com/v1/listen"
 KEEPALIVE_SECONDS = 4  # Deepgram hangs up after 10 seconds with no audio and no KeepAlive
 
 
-def deepgram_url(sample_rate: int) -> str:
+def deepgram_url(sample_rate: int, language: str = "en") -> str:
     return API + "?" + urlencode({
         "model": settings.deepgram_model,
+        "language": language,
         "encoding": "linear16",  # raw 16 bit audio, which is what the page sends
         "sample_rate": sample_rate,
         "channels": 1,
@@ -41,9 +42,9 @@ class DeepgramRelay:
         self.tasks: list[asyncio.Task] = []
         self.ws = None
 
-    async def start(self, sample_rate: int) -> None:
+    async def start(self, sample_rate: int, language: str = "en") -> None:
         headers = {"Authorization": f"Token {settings.deepgram_api_key}"}
-        self.ws = await connect(deepgram_url(sample_rate), additional_headers=headers)
+        self.ws = await connect(deepgram_url(sample_rate, language), additional_headers=headers)
         self.tasks = [asyncio.create_task(self._read()), asyncio.create_task(self._keepalive())]
 
     async def send_audio(self, chunk: bytes) -> None:

@@ -5,7 +5,8 @@ from typing import AsyncIterator
 import anthropic
 
 from app.config import settings
-from app.prompts import SYSTEM_PROMPT
+from app.languages import DEFAULT, Language
+from app.prompts import system_prompt
 
 REFUSAL_TEXT = "Sorry, I can't help with that one."
 MAX_SOURCES = 4
@@ -32,14 +33,14 @@ def web_search_tool() -> dict:
     }
 
 
-async def claude_reply(history: list[dict]) -> AsyncIterator[dict]:
+async def claude_reply(history: list[dict], language: Language = DEFAULT) -> AsyncIterator[dict]:
     messages = list(history)
     sources: dict[str, str] = {}  # url -> title, only pages the answer really cites
     for _ in range(MAX_CONTINUES):
         async with get_client().messages.stream(
             model=settings.anthropic_model,
             max_tokens=4096,  # spoken replies are short, this leaves room to think
-            system=f"{SYSTEM_PROMPT}\n\nToday's date is {date.today():%A %d %B %Y}.",
+            system=f"{system_prompt(language)}\n\nToday's date is {date.today():%A %d %B %Y}.",
             output_config={"effort": settings.anthropic_effort},
             tools=[web_search_tool()],
             messages=messages,

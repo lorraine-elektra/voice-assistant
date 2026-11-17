@@ -12,6 +12,7 @@ and stamps every reply message with its turn, so the browser can ignore anything
 | --- | --- | --- |
 | `user_text` | `text` | What the user said or typed. Starts a new turn. If a reply is still in progress it is cancelled first (barge in). |
 | `stop` | | Cancel the reply in progress. |
+| `settings` | `language`, `voice` | The language and voice picked on the page. `language` is an `id` from `ready`. `voice` is a name from `ready` (ElevenLabs mode) or empty. Applies from the next reply. An unknown language gets an `error` and changes nothing. An unknown voice means the default voice. Send it before `audio_start`, so Deepgram listens in the right language. |
 | `audio_start` | `sample_rate` | Deepgram mode only. Open the speech to text connection. Audio follows as binary messages. |
 | `audio_stop` | | Close the speech to text connection. |
 | `latency` | `turn`, `ms`, `searched` | Measured time from end of speech to first spoken word. The backend logs it. |
@@ -23,7 +24,7 @@ given in `audio_start`. They are ignored unless Deepgram is connected.
 
 | type | fields | meaning |
 | --- | --- | --- |
-| `ready` | `brain`, `stt`, `tts` | Sent once after connecting. Says which mode is active: `brain` is `mock` or `claude`, `stt` is `browser` or `deepgram`, `tts` is `browser` or `elevenlabs`. Never contains a key. |
+| `ready` | `brain`, `stt`, `tts`, `languages`, `voices` | Sent once after connecting. Says which mode is active: `brain` is `mock` or `claude`, `stt` is `browser` or `deepgram`, `tts` is `browser` or `elevenlabs`. `languages` is the list to pick from, each `{"id", "name", "browser"}` where `browser` is the tag for the browser's own speech recognition and voices. `voices` is the list of ElevenLabs voice names, empty when the browser speaks. Never contains a key or a voice id. |
 | `status` | `turn`, `state` | What the backend is doing. `state` is `thinking` or `searching` (a web search is running). |
 | `sentence` | `turn`, `index`, `text` | One finished sentence of the reply. `index` counts from 0 inside the turn. Speak them in order. |
 | `audio` | `turn`, `index`, `audio` | ElevenLabs mode only. The sound of the sentence with the same `index`, as base64 MP3. `audio` is `null` if it could not be made, and then the browser speaks that sentence itself. May arrive out of order. Play by `index`. |

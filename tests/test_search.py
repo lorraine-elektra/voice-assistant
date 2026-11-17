@@ -5,7 +5,7 @@ from types import SimpleNamespace as NS
 
 from app import claude
 from app.config import settings
-from app.prompts import SEARCH_FILLER
+from app.languages import DEFAULT
 from tests.conftest import read_until
 
 
@@ -20,7 +20,7 @@ def test_lookup_question_searches_and_shows_sources(client):
     messages = ask(client, "What is the weather today?")
     kinds = [(m["type"], m.get("state")) for m in messages]
     searching = kinds.index(("status", "searching"))
-    assert messages[searching + 1]["text"] == SEARCH_FILLER  # no long silence
+    assert messages[searching + 1]["text"] == DEFAULT.filler  # no long silence
     assert ("status", "thinking") in kinds[searching:]
     sources = next(m for m in messages if m["type"] == "sources")["sources"]
     assert sources[0]["url"].startswith("https://")

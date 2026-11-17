@@ -23,6 +23,7 @@ class Settings:
     elevenlabs_api_key: str
     elevenlabs_voice_id: str
     elevenlabs_model: str
+    elevenlabs_voices: str = ""  # extra voices to pick from: "Name:id, Name:id"
     # Mock timing, so the mock feels like a real stream. Tests change these.
     mock_word_delay: float = 0.04
     mock_search_delay: float = 1.5
@@ -40,8 +41,23 @@ class Settings:
     @property
     def tts_mode(self) -> str:
         """Text to speech: 'elevenlabs' with a key and a voice, otherwise the browser."""
-        ready = self.elevenlabs_api_key and self.elevenlabs_voice_id
+        ready = self.elevenlabs_api_key and self.voices
         return "elevenlabs" if not self.mock_mode and ready else "browser"
+
+    @property
+    def voices(self) -> dict[str, str]:
+        """ElevenLabs voices by display name. The first one is the default."""
+        found = {"Default": self.elevenlabs_voice_id} if self.elevenlabs_voice_id else {}
+        for pair in self.elevenlabs_voices.split(","):
+            name, _, voice_id = pair.partition(":")
+            if name.strip() and voice_id.strip():
+                found[name.strip()] = voice_id.strip()
+        return found
+
+    def voice_id(self, name: str) -> str:
+        """The id for a voice name. An unknown name gets the default voice."""
+        voices = self.voices
+        return voices.get(name) or next(iter(voices.values()))
 
 
 def load_settings() -> Settings:
@@ -56,6 +72,7 @@ def load_settings() -> Settings:
         elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
         elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID"),
         elevenlabs_model=_env("ELEVENLABS_MODEL"),
+        elevenlabs_voices=_env("ELEVENLABS_VOICES"),
     )
 
 

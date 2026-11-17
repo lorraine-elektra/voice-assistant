@@ -55,6 +55,13 @@ The message format is in `docs/protocol.md`.
 * Time from end of speech to first spoken word is measured, shown in the page and logged. Goal: under 1.5 seconds without a search
 * Regression conversations in `tests/conversations.json`
 
+### Languages and voices
+* A language picker: English, Spanish, French, Naija Pidgin, Ghana Pidgin and Ghana Twi. The table is `app/languages.py`
+* The choice tells Claude which language to reply in, tells Deepgram or the browser which language to listen for, and translates the search filler line
+* A voice picker. With browser speech it lists the browser's voices for that language. With ElevenLabs it lists the names from `ELEVENLABS_VOICE_ID` and `ELEVENLABS_VOICES`. Voice ids never reach the browser
+* Both choices are remembered in the browser and apply from the next reply
+* Known limits (checked against the docs, November 2026): neither Deepgram nor ElevenLabs supports Pidgin, so Pidgin is heard with the English recogniser and spoken by whichever voice is picked. Deepgram Nova-3 hears Twi (as Akan, `ak`), but no ElevenLabs or common browser voice speaks it, so spoken Twi sounds rough and the transcript is the reliable part. Browser recognition of Twi depends on the browser, and the page says so if it cannot
+
 ## Not built yet
 * Deploy to a public URL (Railway)
 * Short demo clip
@@ -69,6 +76,7 @@ The message format is in `docs/protocol.md`.
 * `ANTHROPIC_API_KEY` for real replies and web search
 * `DEEPGRAM_API_KEY` for Deepgram
 * `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for ElevenLabs
+* Optional `ELEVENLABS_VOICES` (`Name:id` pairs) for more voices in the picker, for example Nigerian and Ghanaian accented ones
 * Her own signups and payments, handled by her
 
 ## Open questions

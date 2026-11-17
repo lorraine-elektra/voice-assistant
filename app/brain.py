@@ -11,10 +11,11 @@ from typing import AsyncIterator
 
 from app.claude import claude_reply
 from app.config import settings
+from app.languages import DEFAULT, Language
 from app.mock import mock_reply
 
 
-def reply_events(history: list[dict]) -> AsyncIterator[dict]:
+def reply_events(history: list[dict], language: Language = DEFAULT) -> AsyncIterator[dict]:
     if settings.brain_mode == "claude":
-        return claude_reply(history)
+        return claude_reply(history, language)
     return mock_reply(history)
