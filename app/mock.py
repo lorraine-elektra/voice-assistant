@@ -35,13 +35,13 @@ async def mock_reply(history: list[dict]) -> AsyncIterator[dict]:
             sources = [MOCK_SOURCE]
             reply = (
                 "According to Example News, this is a canned search result. "
-                "Add your Anthropic key to get real web answers."
+                "Add your Gemini key to get real web answers."
             )
         yield {"type": "search_done"}
     else:
         reply = (
             f"This is a mock reply. You said: {said}. "
-            "Add your Anthropic key to hear real answers."
+            "Add your Gemini key to hear real answers."
         )
     async for event in _stream_words(reply):
         yield event

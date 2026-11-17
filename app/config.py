@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from app import abena_voices
+
 load_dotenv()
 
 
@@ -14,65 +16,49 @@ def _env(name: str, default: str = "") -> str:
 @dataclass
 class Settings:
     mock_mode: bool
-    anthropic_api_key: str
-    anthropic_model: str
-    anthropic_effort: str
-    web_search_max_uses: int
-    deepgram_api_key: str
-    deepgram_model: str
-    elevenlabs_api_key: str
-    elevenlabs_voice_id: str
-    elevenlabs_model: str
-    elevenlabs_voices: str = ""  # extra voices to pick from: "Name:id, Name:id"
+    gemini_api_key: str
+    gemini_model: str
+    groq_api_key: str
+    groq_model: str
+    abena_api_key: str
     # Mock timing, so the mock feels like a real stream. Tests change these.
     mock_word_delay: float = 0.04
     mock_search_delay: float = 1.5
 
     @property
     def brain_mode(self) -> str:
-        """'claude' when we can really call Claude, otherwise 'mock'."""
-        return "claude" if not self.mock_mode and self.anthropic_api_key else "mock"
+        """'gemini' when we can really call Gemini, otherwise 'mock'."""
+        return "gemini" if not self.mock_mode and self.gemini_api_key else "mock"
 
     @property
     def stt_mode(self) -> str:
-        """Speech to text: 'deepgram' with a key, otherwise the browser does it."""
-        return "deepgram" if not self.mock_mode and self.deepgram_api_key else "browser"
+        """Speech to text: 'whisper' (Groq) with a key, otherwise the browser does it."""
+        return "whisper" if not self.mock_mode and self.groq_api_key else "browser"
 
     @property
     def tts_mode(self) -> str:
-        """Text to speech: 'elevenlabs' with a key and a voice, otherwise the browser."""
-        ready = self.elevenlabs_api_key and self.voices
-        return "elevenlabs" if not self.mock_mode and ready else "browser"
+        """Text to speech: 'abena' speaks Twi and Pidgin when it has a key. The browser speaks
+        everything else, and everything when there is no key."""
+        return "abena" if self.abena_mode else "browser"
 
     @property
-    def voices(self) -> dict[str, str]:
-        """ElevenLabs voices by display name. The first one is the default."""
-        found = {"Default": self.elevenlabs_voice_id} if self.elevenlabs_voice_id else {}
-        for pair in self.elevenlabs_voices.split(","):
-            name, _, voice_id = pair.partition(":")
-            if name.strip() and voice_id.strip():
-                found[name.strip()] = voice_id.strip()
-        return found
+    def abena_mode(self) -> bool:
+        """Abena speaks Twi and Pidgin when we have its key."""
+        return not self.mock_mode and bool(self.abena_api_key)
 
-    def voice_id(self, name: str) -> str:
-        """The id for a voice name. An unknown name gets the default voice."""
-        voices = self.voices
-        return voices.get(name) or next(iter(voices.values()))
+    def abena_voice(self, language_id: str, choice: str = "") -> str:
+        """The Abena voice for a language and the voice picked on the page ("" if none)."""
+        return abena_voices.voice_id(language_id, choice) if self.abena_mode else ""
 
 
 def load_settings() -> Settings:
     return Settings(
         mock_mode=_env("MOCK_MODE", "true").lower() in ("1", "true", "yes"),
-        anthropic_api_key=_env("ANTHROPIC_API_KEY"),
-        anthropic_model=_env("ANTHROPIC_MODEL", "claude-haiku-5-5"),
-        anthropic_effort=_env("ANTHROPIC_EFFORT", "low"),
-        web_search_max_uses=int(_env("WEB_SEARCH_MAX_USES", "2")),
-        deepgram_api_key=_env("DEEPGRAM_API_KEY"),
-        deepgram_model=_env("DEEPGRAM_MODEL", "nova-3"),
-        elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
-        elevenlabs_voice_id=_env("ELEVENLABS_VOICE_ID"),
-        elevenlabs_model=_env("ELEVENLABS_MODEL"),
-        elevenlabs_voices=_env("ELEVENLABS_VOICES"),
+        gemini_api_key=_env("GEMINI_API_KEY"),
+        gemini_model=_env("GEMINI_MODEL", "gemini-2.5-flash"),
+        groq_api_key=_env("GROQ_API_KEY"),
+        groq_model=_env("GROQ_MODEL", "whisper-large-v3"),
+        abena_api_key=_env("ABENA_API_KEY"),
     )
 
 

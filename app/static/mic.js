@@ -79,6 +79,13 @@ export class Mic {
     }
   }
 
+  // Current loudness from 0 to 1, for drawing. Zero when the mic is closed.
+  level() {
+    if (!this.analyser) return 0;
+    this.analyser.getFloatTimeDomainData(this.samples);
+    return Math.min(1, rms(this.samples) * 4);
+  }
+
   close() {
     this.unwatch();
     this.stream?.getTracks().forEach((track) => track.stop());

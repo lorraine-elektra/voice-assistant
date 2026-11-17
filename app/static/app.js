@@ -1,14 +1,20 @@
 // The page: connection, state, transcript. Message format is in docs/protocol.md.
 import { Player, canSpeak } from "./speech-out.js";
+import { Choices } from "./choices.js";
 import { BrowserListener, recognitionSupported } from "./speech-in.js";
 import { DeepgramListener } from "./speech-in-deepgram.js";
+import { WhisperListener } from "./speech-in-whisper.js";
 import { Mic, isPhone } from "./mic.js";
+import { robot, restyle } from "./robot.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
+  setup: $("setup"), setupForm: $("setup-form"), chat: $("chat"), openSetup: $("open-setup"),
+  start: $("start"), name: $("name"), previewName: $("preview-name"), stage: $("stage"), botName: $("bot-name"),
   transcript: $("transcript"), hint: $("hint"), banner: $("banner"), mic: $("mic"),
   micLabel: $("mic-label"), status: $("status"), stop: $("stop"), form: $("typed"),
-  text: $("text"), modes: $("modes"), latency: $("latency"),
+  text: $("text"), modes: $("modes"), latency: $("latency"), latencyText: $("latency-text"),
+  latencyBar: $("latency-bar"), wave: $("wave"),
 };
 const LABELS = {
   connecting: "Connecting", offline: "Connection lost. Reconnecting", idle: "Idle",
@@ -25,7 +31,7 @@ const state = {
   turn: 0,           // counts user messages, exactly like the backend does
   activeTurn: null,  // the turn whose reply we accept. Anything else is stale.
   brain: "?",
-  stt: "browser",    // who turns speech into text: "browser" or "deepgram"
+  stt: "browser",    // who turns speech into text: "browser", "deepgram" or "whisper"
   tts: "browser",    // who speaks: "browser" or "elevenlabs"
 };
 let socket;
@@ -36,13 +42,71 @@ const audioWaiters = new Map(); // sentence index -> function that delivers its 
 let timing = null;              // measures end of speech to first spoken word
 let listener = null;            // BrowserListener or DeepgramListener, see chooseListener
 
-const player = new Player({ onStart: () => { reportLatency(); sync(); }, onIdle: () => sync() });
+const player = new Player({
+  onStart: (sentence) => { markLive(sentence); reportLatency(); sync(); },
+  onIdle: () => { markLive(null); sync(); },
+});
+const choices = new Choices({
+  languageEl: $("language"), voiceEl: $("voice"), helpEl: $("voice-help"),
+  genderEls: document.querySelectorAll('input[name="gender"]'), onChange: applyChoices,
+});
+
+// ---------- setup: name, voice type, language, voice ----------
+
+function recall(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function remember(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* not remembered in a private window */ }
+}
+
+const assistantName = () => els.name.value.trim() || "Assistant";
+const robots = {
+  preview: robot("assistant", choices.gender),
+  you: robot("you", "woman"),
+  bot: robot("assistant", choices.gender),
+};
+$("preview-robot").append(robots.preview);
+$("you-robot").append(robots.you);
+$("bot-robot").append(robots.bot);
+
+// Everything that shows the assistant's name or look follows the setup form.
+function showAssistant() {
+  const name = els.name.value.trim();
+  els.previewName.textContent = name || "Your assistant";
+  els.botName.textContent = assistantName();
+  for (const el of [robots.preview, robots.bot]) if (el.dataset.gender !== choices.gender) restyle(el, choices.gender);
+}
+
+function showSetup(open) {
+  els.setup.hidden = !open;
+  els.chat.hidden = open;
+  els.openSetup.hidden = open;
+  if (open) {
+    els.start.textContent = recall("setup-done") ? "Save changes" : "Start talking";
+    els.name.focus();
+  } else {
+    els.text.focus();
+  }
+}
+
+els.name.value = recall("name") || "";
+els.name.addEventListener("input", showAssistant);
+els.openSetup.addEventListener("click", () => showSetup(true));
+els.setupForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  remember("name", els.name.value.trim());
+  remember("setup-done", "1");
+  showAssistant();
+  applyChoices();
+  showSetup(false);
+});
 const mic = new Mic(() => {
   interrupt(true);
   listener?.sendPreroll?.();
 });
 const listenerHandlers = {
-  onInterim: (text) => { hideBanner(); showPending(text); },
+  onInterim: (text) => { hideBanner(); if (text) showPending(text); else clearPending(); },
   onFinal: (text) => {
     clearPending();
     if (text) sendUserText(text);
@@ -59,10 +123,13 @@ function chooseListener() {
   if (state.stt === "deepgram") {
     const sendBytes = (chunk) => socket.readyState === WebSocket.OPEN && socket.send(chunk);
     listener = new DeepgramListener({ mic, sendJson: send, sendBytes, ...listenerHandlers });
+  } else if (state.stt === "whisper") {
+    listener = new WhisperListener({ mic, sendJson: send, ...listenerHandlers });
   } else {
     mic.onChunk = null;
     listener = recognitionSupported ? new BrowserListener(listenerHandlers) : null;
   }
+  listener?.setLanguage(choices.tag);
   els.mic.disabled = !listener;
   if (!listener) {
     els.micLabel.textContent = "Voice input is not supported in this browser";
@@ -87,6 +154,7 @@ function sync() {
   const now = currentState();
   els.status.textContent = LABELS[now];
   els.mic.dataset.state = now;
+  els.stage.dataset.state = now; // the robots move with this
   els.mic.setAttribute("aria-pressed", String(state.micOn));
   if (listener) els.micLabel.textContent = state.micOn ? "Stop listening" : "Start listening";
   els.stop.hidden = !["thinking", "searching", "speaking"].includes(now);
@@ -122,18 +190,28 @@ function hideBanner() {
 
 // ---------- transcript ----------
 
+// One turn: a small robot and a speech bubble. You sit on the left, the assistant on the right.
 function addBubble(role, text) {
   els.hint.remove();
-  const bubble = document.createElement("p");
-  bubble.className = `bubble ${role}`;
+  const bubble = document.createElement("div");
+  bubble.className = `turn ${role}`;
+  const mine = role === "user";
   const who = Object.assign(document.createElement("span"), {
-    className: "who", textContent: role === "user" ? "You" : "Assistant",
+    className: "who", textContent: mine ? "You" : assistantName(),
   });
   const words = Object.assign(document.createElement("span"), { className: "words", textContent: text });
-  bubble.append(who, words);
+  const content = Object.assign(document.createElement("div"), { className: "content" });
+  content.append(who, words);
+  bubble.append(robot(mine ? "you" : "assistant", mine ? "woman" : choices.gender), content);
   els.transcript.append(bubble);
   els.transcript.scrollTop = els.transcript.scrollHeight;
   return bubble;
+}
+
+// The sentence being spoken right now gets an underline.
+function markLive(sentence) {
+  els.transcript.querySelectorAll(".s.live").forEach((span) => span.classList.remove("live"));
+  sentence?.classList.add("live");
 }
 
 function replyBubble(turn) {
@@ -165,12 +243,12 @@ function addSources(turn, sources) {
     item.append("Source: ", link);
     list.append(item);
   }
-  replyBubble(turn).append(list);
+  replyBubble(turn).querySelector(".content").append(list);
   els.transcript.scrollTop = els.transcript.scrollHeight;
 }
 
 function addNote(turn, text) {
-  replyBubble(turn).append(Object.assign(document.createElement("span"), { className: "note", textContent: text }));
+  replyBubble(turn).querySelector(".content").append(Object.assign(document.createElement("span"), { className: "note", textContent: text }));
 }
 
 // ---------- talking to the backend ----------
@@ -198,6 +276,7 @@ function sendUserText(raw) {
 function interrupt(tellBackend) {
   const busy = Boolean(state.backend) || player.speaking;
   player.stop();
+  markLive(null);
   audioWaiters.forEach((deliver) => deliver(null));
   audioWaiters.clear();
   timing = null;
@@ -215,14 +294,29 @@ function reportLatency() {
   const { turn, searched } = timing;
   timing = null;
   const verdict = searched ? "included a web search" : ms <= GOAL_MS ? "within the 1.5 s goal" : "over the 1.5 s goal";
-  els.latency.textContent = `First spoken word after ${(ms / 1000).toFixed(2)} s (${verdict})`;
+  els.latencyText.textContent = `First word after ${(ms / 1000).toFixed(2)} s, ${verdict}`;
+  els.latencyBar.style.width = `${Math.min(100, (ms / GOAL_MS) * 100)}%`;
+  els.latencyBar.classList.toggle("over", ms > GOAL_MS);
   els.latency.hidden = false;
   send({ type: "latency", turn, ms, searched });
 }
 
+// The language or voice picker changed: tell the browser voice, the backend and the listener.
+// The backend must hear it first, so a new Deepgram connection opens in the new language.
+function applyChoices() {
+  player.lang = choices.tag;
+  player.voice = choices.browserVoice;
+  send({ ...choices.message, name: els.name.value.trim() });
+  showAssistant();
+  listener?.setLanguage(choices.tag);
+  sync();
+}
+
 function onReady(message) {
   Object.assign(state, { brain: message.brain, stt: message.stt, tts: message.tts });
+  choices.setOptions(message);
   chooseListener();
+  applyChoices();
   showModes();
   sync();
 }
@@ -246,17 +340,24 @@ function onMessage(message) {
     state.backend = message.state;
     if (message.state === "searching" && timing) timing.searched = true;
   }
+  if (message.type === "language") {
+    // Gemini says which language the reply is in. In automatic mode the browser voice follows it.
+    const spoken = choices.voiceFor(message.language);
+    if (spoken) Object.assign(player, { lang: spoken.tag, voice: spoken.voice });
+  }
   if (message.type === "sentence") {
     const words = replyBubble(turn).querySelector(".words");
-    words.textContent = `${words.textContent} ${message.text}`.trim();
+    const sentence = Object.assign(document.createElement("span"), { className: "s", textContent: message.text });
+    if (words.childNodes.length) words.append(" ");
+    words.append(sentence);
     els.transcript.scrollTop = els.transcript.scrollHeight;
-    // With ElevenLabs the audio for this sentence follows in its own message.
-    const audio = state.tts === "elevenlabs"
+    // When the backend makes audio for this sentence, it follows in its own message.
+    const audio = (message.audio_expected ?? state.tts === "elevenlabs")
       ? new Promise((deliver) => audioWaiters.set(message.index, deliver))
       : null;
-    player.enqueue(message.text, audio);
+    player.enqueue(message.text, audio, sentence);
   }
-  if (message.type === "audio") audioWaiters.get(message.index)?.(message.audio);
+  if (message.type === "audio") audioWaiters.get(message.index)?.(message.audio && { audio: message.audio, mime: message.mime || "audio/mpeg" });
   if (message.type === "sources") addSources(turn, message.sources);
   if (message.type === "search_failed") addNote(turn, "The web search did not work, so this answer is from memory.");
   if (message.type === "done") state.backend = null;
@@ -298,7 +399,7 @@ async function setMic(on) {
   }
   hideBanner();
   interrupt(true); // pressing the mic while it talks also counts as barge in
-  const deepgram = state.stt === "deepgram";
+  const deepgram = state.stt !== "browser"; // the backend does the listening, so we need raw audio
   // With browser recognition, phones cannot share the mic with the level monitor.
   if (isPhone && !deepgram) return;
   try {
@@ -322,7 +423,54 @@ els.form.addEventListener("submit", (event) => {
   els.text.value = "";
 });
 
+// ---------- the strip: one line that shows who has the floor ----------
+
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const cssColor = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let smoothLevel = 0;
+
+function drawWave(now) {
+  const canvas = els.wave;
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  if (canvas.width !== Math.round(width * ratio)) {
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  const mode = currentState();
+  const t = reducedMotion.matches ? 0 : now / 1000;
+  smoothLevel += ((mode === "listening" ? mic.level() : 0) - smoothLevel) * 0.25;
+  let color = cssColor("--rule"), amp = 0.02, speed = 0, dash = [];
+  if (mode === "listening") { color = cssColor("--cobalt"); amp = 0.06 + smoothLevel * 0.9; speed = 6; }
+  if (mode === "speaking") { color = cssColor("--green"); amp = 0.35; speed = 3; }
+  if (mode === "thinking") color = cssColor("--muted");
+  if (mode === "searching") { color = cssColor("--muted"); dash = [2, 8]; }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.setLineDash(dash);
+  ctx.beginPath();
+  for (let x = 0; x <= width; x += 3) {
+    const edge = Math.sin((x / width) * Math.PI);  // calm at both ends
+    const wobble = Math.sin(x / 14 + t * speed) * Math.sin(x / 41 - t * speed * 0.6);
+    const y = height / 2 + wobble * amp * (height / 2) * edge;
+    x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  if (!reducedMotion.matches) requestAnimationFrame(drawWave);
+}
+const redraw = () => requestAnimationFrame(drawWave);
+reducedMotion.addEventListener("change", redraw);
+window.addEventListener("resize", () => reducedMotion.matches && redraw());
+new MutationObserver(() => reducedMotion.matches && redraw()).observe(els.status, { childList: true });
+redraw();
+
 chooseListener();
 showModes();
+showAssistant();
 sync();
+showSetup(recall("setup-done") !== "1");
 connect();

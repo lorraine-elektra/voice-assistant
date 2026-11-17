@@ -14,9 +14,10 @@ export class Player {
     this.audio = new Audio();
   }
 
-  // audio: optional promise of base64 MP3 (or null if the backend could not make it).
-  enqueue(text, audio = null) {
-    this.queue.push({ text, audio });
+  // audio: optional promise of { audio: base64, mime } (or null if the backend could not make it).
+  // tag: handed back to onStart, so the page knows which sentence is sounding.
+  enqueue(text, audio = null, tag = null) {
+    this.queue.push({ text, audio, tag });
     if (!this.speaking) this.next();
   }
 
@@ -46,18 +47,18 @@ export class Player {
       clearTimeout(this.watchdog);
       this.next();
     };
-    const started = () => generation === this.generation && this.onStart();
+    const started = () => generation === this.generation && this.onStart(item.tag);
 
     const timeout = new Promise((resolve) => setTimeout(resolve, AUDIO_WAIT_MS, null));
-    const mp3 = item.audio && (await Promise.race([item.audio, timeout]));
+    const clip = item.audio && (await Promise.race([item.audio, timeout]));
     if (generation !== this.generation) return; // stopped while waiting for the audio
     const useBrowser = () => generation === this.generation && this.speakWithBrowser(item.text, started, finish);
-    if (mp3) this.playAudio(mp3, started, useBrowser, finish);
+    if (clip) this.playAudio(clip, started, useBrowser, finish);
     else useBrowser();
   }
 
-  playAudio(mp3, started, fallback, finish) {
-    this.audio.src = `data:audio/mpeg;base64,${mp3}`;
+  playAudio(clip, started, fallback, finish) {
+    this.audio.src = `data:${clip.mime};base64,${clip.audio}`;
     this.audio.onplaying = started;
     this.audio.onended = finish;
     this.audio.onerror = fallback;
@@ -71,6 +72,8 @@ export class Player {
       return;
     }
     const utterance = new SpeechSynthesisUtterance(text);
+    if (this.lang) utterance.lang = this.lang;     // both set by the page from the pickers
+    if (this.voice) utterance.voice = this.voice;
     utterance.onstart = started;
     utterance.onend = finish;
     utterance.onerror = finish;

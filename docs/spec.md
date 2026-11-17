@@ -62,6 +62,16 @@ The message format is in `docs/protocol.md`.
 * Both choices are remembered in the browser and apply from the next reply
 * Known limits (checked against the docs, November 2026): neither Deepgram nor ElevenLabs supports Pidgin, so Pidgin is heard with the English recogniser and spoken by whichever voice is picked. Deepgram Nova-3 hears Twi (as Akan, `ak`), but no ElevenLabs or common browser voice speaks it, so spoken Twi sounds rough and the transcript is the reliable part. Browser recognition of Twi depends on the browser, and the page says so if it cannot
 
+## Migration to a free tier cascade (in progress, approved)
+Replacing Claude, Deepgram and ElevenLabs with Groq Whisper (speech to text), Gemini
+(`gemini-2.5-flash`, reply and language detection in one JSON call), Abena AI (Twi and both Pidgin voices, Twi speech fallback). Abena has one Twi man (Kofi) and no Pidgin woman, so the Pidgin women are its English voices with a Ghanaian or Nigerian accent. YarnGPT is skipped unless the Abena Naija Pidgin voice sounds wrong. English, French and Spanish
+are spoken by the browser voice.
+* Done: Abena text to speech and routing (Twi, Ghana Pidgin and Naija Pidgin use Abena voices when `ABENA_API_KEY` is set), Abena speech to text module, Gemini brain (`app/gemini.py`), Groq module (`app/whisper.py`), `auto` language, `language` message, config
+* Done too: the page records each phrase (it detects start and end itself, sends 16 kHz WAV) and Groq Whisper transcribes it. Low confidence phrases get Abena as a second opinion. Voice pickers: Abena voices by name for Twi and Pidgin, a woman and a man from the browser's voices for other languages, woman or man when the language is automatic
+* Not done: removing Deepgram and ElevenLabs
+* Web search is dropped for now. Gemini may not allow Google Search together with JSON output, to be checked
+* Blocked on the owner: keys, and the Abena and YarnGPT API docs
+
 ## Not built yet
 * Deploy to a public URL (Railway)
 * Short demo clip

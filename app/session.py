@@ -8,16 +8,15 @@ import time
 import httpx
 from fastapi import WebSocket
 
-from app import tts
+from app import abena, abena_voices, whisper
 from app.brain import reply_events
 from app.config import settings
 from app.languages import DEFAULT, LANGUAGES, for_browser
 from app.sentences import SentenceSplitter
-from app.stt import DeepgramRelay
 
 log = logging.getLogger("voice")
 ERROR_TEXT = "Sorry, something went wrong on my side. Please try again."
-STT_FAILED_TEXT = "The speech service is not available, so the browser will listen instead."
+PHRASE_FAILED_TEXT = "I could not hear that. Please try again."
 
 
 class Session:
@@ -25,13 +24,12 @@ class Session:
         self.ws = websocket
         self.history: list[dict] = []  # lives only as long as the connection
         self.turn = 0
-        self.language = DEFAULT  # both set by the `settings` message
+        self.language = DEFAULT  # all three set by the `settings` message
         self.voice = ""
-        self.language = DEFAULT  # both set by the `settings` message
-        self.voice = ""
+        self.name = ""  # what the user calls the assistant
         self.reply_task: asyncio.Task | None = None
-        self.relay: DeepgramRelay | None = None
-        self.http: httpx.AsyncClient | None = None  # reused for every ElevenLabs request
+        self.phrase_tasks: set[asyncio.Task] = set()  # phrases being transcribed
+        self.http: httpx.AsyncClient | None = None  # reused for every Groq and Abena request
         self._send_lock = asyncio.Lock()
 
     async def send(self, **message) -> None:
@@ -41,23 +39,20 @@ class Session:
     async def run(self) -> None:
         await self.send(
             type="ready", brain=settings.brain_mode, stt=settings.stt_mode, tts=settings.tts_mode,
-            languages=for_browser(),
-            # Names only. The ids stay on the backend.
-            voices=list(settings.voices) if settings.tts_mode == "elevenlabs" else [],
+            languages=for_browser(), abena=settings.abena_mode,
+            abena_voices=abena_voices.for_browser() if settings.abena_mode else {},
         )
         try:
             while True:
                 frame = await self.ws.receive()
                 if frame["type"] == "websocket.disconnect":
                     break
-                if frame.get("bytes") is not None:
-                    if self.relay:
-                        await self.relay.send_audio(frame["bytes"])
-                elif frame.get("text") is not None:
+                if frame.get("text") is not None:  # binary frames are not used, ignore them
                     await self.on_text_frame(frame["text"])
         finally:
             await self.cancel_reply(notify=False)
-            await self.stop_listening()
+            for task in self.phrase_tasks:
+                task.cancel()
             if self.http:
                 await self.http.aclose()
 
@@ -85,10 +80,11 @@ class Session:
                 return
             self.language = language
             self.voice = str(message.get("voice") or "")
-        elif kind == "audio_start":
-            await self.start_listening(message.get("sample_rate"))
-        elif kind == "audio_stop":
-            await self.stop_listening()
+            self.name = " ".join(str(message.get("name") or "").split())[:30]
+        elif kind == "phrase":
+            task = asyncio.create_task(self.hear_phrase(message))
+            self.phrase_tasks.add(task)
+            task.add_done_callback(self.phrase_tasks.discard)
         elif kind == "latency":
             log.info(
                 "Turn %s: %s ms from end of speech to first spoken word (web search: %s)",
@@ -97,31 +93,36 @@ class Session:
         else:
             await self.send(type="error", message=f"Unknown message type: {kind}")
 
-    # ---------- speech to text (Deepgram) ----------
+    # ---------- speech to text: Groq Whisper, with Abena as a second opinion ----------
 
-    async def start_listening(self, sample_rate) -> None:
-        await self.stop_listening()
+    async def hear_phrase(self, message: dict) -> None:
+        """One recorded phrase from the browser. The words go back as a final transcript."""
         try:
-            if settings.stt_mode != "deepgram":
-                raise RuntimeError("Deepgram is not configured")
-            relay = DeepgramRelay(self.on_transcript, self.on_stt_closed)
-            await relay.start(int(sample_rate), self.language.deepgram)
-            self.relay = relay
+            if settings.stt_mode != "whisper":
+                raise RuntimeError("Whisper is not configured")
+            audio = base64.b64decode(message["audio"])
+            mime = str(message.get("mime") or "audio/wav")
+            if self.http is None:
+                self.http = httpx.AsyncClient()
+            heard = await whisper.transcribe(self.http, audio, mime)
+            text = heard.text
+            if not heard.confident and settings.abena_mode:
+                text = await self.second_opinion(audio, mime) or text
+            await self.send(type="transcript", text=text, final=True)
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
-            log.warning("Could not start Deepgram: %s", error)
-            await self.send(type="stt_failed", message=STT_FAILED_TEXT)
+            log.warning("Could not transcribe a phrase: %s", error)
+            await self.send(type="error", message=PHRASE_FAILED_TEXT)
 
-    async def stop_listening(self) -> None:
-        relay, self.relay = self.relay, None
-        if relay:
-            await relay.close()
-
-    async def on_transcript(self, text: str, final: bool) -> None:
-        await self.send(type="transcript", text=text, final=final)
-
-    async def on_stt_closed(self) -> None:
-        self.relay = None
-        await self.send(type="stt_failed", message=STT_FAILED_TEXT)
+    async def second_opinion(self, audio: bytes, mime: str) -> str:
+        """Whisper was guessing, which often means Twi. Ask Abena. "" if it cannot help."""
+        language = self.language.id if self.language.id in abena.ASR_LANGUAGES else "tw"
+        try:
+            return await abena.transcribe(self.http, audio, mime, language)
+        except Exception as error:
+            log.warning("Abena could not give a second opinion: %s", error)
+            return ""
 
     # ---------- the reply ----------
 
@@ -139,16 +140,19 @@ class Session:
         if notify:
             await self.send(type="cancelled", turn=self.turn)
 
-    async def send_audio(self, turn: int, index: int, text: str) -> None:
+    async def send_audio(self, turn: int, index: int, text: str, language_id: str) -> None:
         """Turn one sentence into audio. On failure send null so the browser speaks it."""
+        audio = mime = None
         try:
             if self.http is None:
                 self.http = httpx.AsyncClient()
-            audio = base64.b64encode(await tts.synthesize(self.http, text, settings.voice_id(self.voice))).decode()
+            voice = settings.abena_voice(language_id, self.voice)
+            audio = base64.b64encode(await abena.synthesize(self.http, text, voice)).decode()
+            mime = abena.MIME
         except Exception as error:
-            log.warning("ElevenLabs failed for a sentence, the browser will speak it: %s", error)
-            audio = None
-        await self.send(type="audio", turn=turn, index=index, audio=audio)
+            log.warning("Speech service failed for a sentence, the browser will speak it: %s", error)
+            audio = mime = None
+        await self.send(type="audio", turn=turn, index=index, audio=audio, mime=mime)
 
     async def reply(self, turn: int, user_text: str) -> None:
         self.history.append({"role": "user", "content": user_text})
@@ -157,26 +161,32 @@ class Session:
         audio_tasks: list[asyncio.Task] = []
         started = time.monotonic()
         language = self.language  # a change mid reply waits for the next reply
+        extra = {"name": self.name} if self.name else {}  # only sent when set
+        spoken_id = language.id  # the language the reply is really in, once Gemini says
 
         async def say(sentence: str) -> None:
             index = len(spoken)
             if index == 0:
                 log.info("Turn %s: first sentence ready after %d ms", turn, (time.monotonic() - started) * 1000)
-            await self.send(type="sentence", turn=turn, index=index, text=sentence)
+            has_audio = bool(settings.abena_voice(spoken_id, self.voice))
+            await self.send(type="sentence", turn=turn, index=index, text=sentence, audio_expected=has_audio)
             spoken.append(sentence)
-            if settings.tts_mode == "elevenlabs":
+            if has_audio:
                 # Start right away so sentences are prepared in parallel.
                 # The browser plays them in order of their index.
-                audio_tasks.append(asyncio.create_task(self.send_audio(turn, index, sentence)))
+                audio_tasks.append(asyncio.create_task(self.send_audio(turn, index, sentence, spoken_id)))
 
         try:
             await self.send(type="status", turn=turn, state="thinking")
             searched = False
-            async for event in reply_events(self.history, language):
+            async for event in reply_events(self.history, language, **extra):
                 kind = event["type"]
                 if kind == "text":
                     for sentence in splitter.feed(event["text"]):
                         await say(sentence)
+                elif kind == "language":
+                    spoken_id = event["language"]
+                    await self.send(type="language", turn=turn, language=event["language"])
                 elif kind == "searching":
                     for sentence in splitter.flush():
                         await say(sentence)
