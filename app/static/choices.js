@@ -23,6 +23,7 @@ export class Choices {
     this.genderEls = [...genderEls];
     this.languages = [FALLBACK];
     this.abenaVoices = {};   // language id -> Abena voices, for Twi and Pidgin
+    this.picked = false;     // true once the user chose a language themselves
     this.genderEls.forEach((radio) => {
       radio.checked = radio.value === "woman";
       radio.addEventListener("change", () => {
@@ -31,6 +32,7 @@ export class Choices {
       });
     });
     languageEl.addEventListener("change", () => {
+      this.picked = true;
       this.fillVoices();
       onChange();
     });
@@ -46,7 +48,8 @@ export class Choices {
   setOptions({ languages, abena_voices }) {
     if (languages?.length) this.languages = languages;
     this.abenaVoices = abena_voices || {};
-    this.fillLanguages();
+    // Until the user picks, the first language in the backend's list (automatic) is the default.
+    this.fillLanguages(this.picked ? this.els.language.value : this.languages[0].id);
   }
 
   // "woman" or "man", from the radio buttons.
@@ -84,10 +87,6 @@ export class Choices {
     return Boolean(this.abenaVoices[this.language.id]) || this.language.id === "auto";
   }
 
-  get voiceKey() {
-    return this.abenaVoices[this.language.id] ? `voice:abena:${this.language.id}` : `voice:${this.language.id}`;
-  }
-
   // In automatic mode the reply language is only known once Gemini says it. This finds the
   // browser voice of the picked kind (woman or man) for that language.
   voiceFor(languageId) {
@@ -103,8 +102,8 @@ export class Choices {
     return { tag, voice: voice || null };
   }
 
-  fillLanguages() {
-    const wanted = this.els.language.value; // keep the pick when the list is rebuilt
+  // wanted: the language to select, by default the one already picked.
+  fillLanguages(wanted = this.els.language.value) {
     this.els.language.replaceChildren(...this.languages.map((lang) => new Option(lang.name, lang.id)));
     if (this.languages.some((lang) => lang.id === wanted)) this.els.language.value = wanted;
     this.fillVoices();
@@ -142,12 +141,19 @@ export class Choices {
   browserOptions(kind) {
     const voices = this.matchingBrowserVoices();
     const mine = voices.filter((voice) => genderOf(voice.name) === kind);
-    if (mine.length) return [mine.map((v) => new Option(v.name, v.name)), ""];
+    const missing = this.hasOwnVoice() ? "" : `This browser has no ${this.language.name} voice, so another language's voice will read it. `;
+    if (mine.length) return [mine.map((v) => new Option(v.name, v.name)), missing.trim()];
     const label = (v) => new Option(`${v.name} (${v.lang})`, v.name);
     if (!voices.length) return [[new Option("Browser default", "")], "This browser has no voices to choose from."];
     const help = voices.some((v) => genderOf(v.name)) ? `No ${kind} voice found in this browser. Showing all voices.`
       : "This browser does not say which voices are a woman or a man, so all are shown.";
-    return [[new Option("Browser default", ""), ...voices.map(label)], help];
+    return [[new Option("Browser default", ""), ...voices.map(label)], missing + help];
+  }
+
+  // True when the browser has at least one voice in the chosen language.
+  hasOwnVoice() {
+    const tag = primary(this.language.browser);
+    return canSpeak && speechSynthesis.getVoices().some((voice) => primary(voice.lang.replace("_", "-")) === tag);
   }
 
   // Browser voices for the chosen language, the exact region first (en-NG before en-US).
