@@ -2,12 +2,16 @@
 // A sentence is spoken with Abena audio from the backend when there is some,
 // otherwise with the browser's own voice.
 export const canSpeak = "speechSynthesis" in window;
-const AUDIO_WAIT_MS = 8000; // how long to wait for a sentence's audio before giving up
+// How long to wait for a sentence's audio before the browser voice reads it instead.
+// Abena often needs 4 to 8 seconds, so a short wait made an English voice read Twi.
+const AUDIO_WAIT_MS = 15000;
 
 export class Player {
-  constructor({ onStart, onIdle }) {
+  constructor({ onStart, onIdle, onWait }) {
     this.onStart = onStart; // a sentence has started to sound
     this.onIdle = onIdle;   // the queue is empty
+    this.onWait = onWait;   // silent for now: waiting for a sentence's audio to arrive
+    this.waiting = false;
     this.queue = [];
     this.speaking = false;
     this.generation = 0;    // goes up on stop(), so late callbacks are ignored
@@ -25,7 +29,7 @@ export class Player {
   stop() {
     this.generation++;
     this.queue = [];
-    this.speaking = false;
+    this.speaking = this.waiting = false;
     clearTimeout(this.watchdog);
     this.audio.pause();
     if (canSpeak) speechSynthesis.cancel();
@@ -47,10 +51,21 @@ export class Player {
       clearTimeout(this.watchdog);
       this.next();
     };
-    const started = () => generation === this.generation && this.onStart(item.tag);
+    const started = () => {
+      if (generation !== this.generation) return;
+      this.waiting = false;
+      this.onStart(item.tag);
+    };
 
-    const timeout = new Promise((resolve) => setTimeout(resolve, AUDIO_WAIT_MS, null));
-    const clip = item.audio && (await Promise.race([item.audio, timeout]));
+    let clip = null;
+    if (item.audio) {
+      let timer;
+      const timeout = new Promise((resolve) => { timer = setTimeout(resolve, AUDIO_WAIT_MS, null); });
+      this.waiting = true;
+      this.onWait?.();
+      clip = await Promise.race([item.audio, timeout]);
+      clearTimeout(timer);
+    }
     if (generation !== this.generation) return; // stopped while waiting for the audio
     const useBrowser = () => generation === this.generation && this.speakWithBrowser(item.text, started, finish);
     if (clip) this.playAudio(clip, started, useBrowser, finish);

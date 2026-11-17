@@ -18,6 +18,7 @@ const els = {
 const LABELS = {
   connecting: "Connecting", offline: "Connection lost. Reconnecting", idle: "Idle",
   listening: "Listening", thinking: "Thinking", searching: "Searching the web", speaking: "Speaking",
+  preparing: "Preparing the voice",
 };
 const GOAL_MS = 1500;
 const MIC_DENIED = "Microphone permission was denied. Allow the microphone for this page in your browser settings, or type instead.";
@@ -44,6 +45,7 @@ let listener = null;            // BrowserListener or PhraseListener, see choose
 const player = new Player({
   onStart: (sentence) => { markLive(sentence); reportLatency(); sync(); },
   onIdle: () => { markLive(null); sync(); },
+  onWait: () => sync(),
 });
 const choices = new Choices({
   languageEl: $("language"), voiceEl: $("voice"), helpEl: $("voice-help"),
@@ -140,6 +142,7 @@ function chooseListener() {
 function currentState() {
   if (!state.connected) return state.everConnected ? "offline" : "connecting";
   if (state.backend === "searching") return "searching";
+  if (player.waiting) return "preparing"; // the sentence is on screen, its Abena audio is not here yet
   if (player.speaking) return "speaking";
   if (state.backend) return "thinking";
   return state.micOn ? "listening" : "idle";
@@ -147,12 +150,13 @@ function currentState() {
 
 function sync() {
   const now = currentState();
+  const look = now === "preparing" ? "thinking" : now; // preparing looks like thinking
   els.status.textContent = LABELS[now];
-  els.mic.dataset.state = now;
-  els.stage.dataset.state = now; // the robots move with this
+  els.mic.dataset.state = look;
+  els.stage.dataset.state = look; // the robots move with this
   els.mic.setAttribute("aria-pressed", String(state.micOn));
   if (listener) els.micLabel.textContent = state.micOn ? "Stop listening" : "Start listening";
-  els.stop.hidden = !["thinking", "searching", "speaking"].includes(now);
+  els.stop.hidden = !["thinking", "searching", "preparing", "speaking"].includes(now);
   // Do not transcribe the assistant's own voice: stop listening while it speaks
   // and let the level monitor watch for the user instead.
   if (listener) listener.setActive(state.micOn && state.connected && !player.speaking);
@@ -440,7 +444,7 @@ function drawWave(now) {
   let color = cssColor("--rule"), amp = 0.02, speed = 0, dash = [];
   if (mode === "listening") { color = cssColor("--cobalt"); amp = 0.06 + smoothLevel * 0.9; speed = 6; }
   if (mode === "speaking") { color = cssColor("--green"); amp = 0.35; speed = 3; }
-  if (mode === "thinking") color = cssColor("--muted");
+  if (mode === "thinking" || mode === "preparing") color = cssColor("--muted");
   if (mode === "searching") { color = cssColor("--muted"); dash = [2, 8]; }
   ctx.strokeStyle = color;
   ctx.lineWidth = 3;
