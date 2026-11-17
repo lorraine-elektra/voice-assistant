@@ -6,16 +6,16 @@ answer is spoken back sentence by sentence. It works out which language you spok
 interrupt it mid sentence (barge in).
 
 It runs with **no API keys at all** in mock mode, and switches each piece to the real
-service as soon as its key is in `.env`. The free tiers of Groq, Google AI Studio and
-Abena are enough to try it.
+service once `MOCK_MODE=false` and its key are in `.env`. The free tiers of Google AI
+Studio and Abena are enough to try it.
 
 ## How it flows
 
 ```mermaid
 flowchart LR
     subgraph Browser
-        Mic[Microphone] --> Rec[Phrase recorder: WAV]
-        Mic -. no Groq key .-> STTb[Browser speech recognition]
+        Mic[Microphone] --> STTb[Browser speech recognition]
+        Mic -. Twi and Pidgin .-> Rec[Phrase recorder: WAV]
         Rec --> WS((WebSocket))
         STTb --> WS
         WS --> Player[Sentence player]
@@ -26,20 +26,18 @@ flowchart LR
         WS <--> Session[Session: history, turns, barge in]
         Session --> Brain{Mock or Gemini}
         Brain --> Split[Sentence splitter] --> Session
-        Session -. phrase .-> Whisper[Groq Whisper]
-        Session -. low confidence .-> AbenaASR[Abena speech to text]
+        Session -. Twi and Pidgin phrase .-> AbenaASR[Abena speech to text]
         Session -. Twi and Pidgin sentence .-> AbenaTTS[Abena voices]
     end
     Brain <--> Gemini[(Gemini API)]
-    Whisper <--> Groq[(Groq)]
     AbenaASR <--> Abena[(Abena AI)]
     AbenaTTS <--> Abena
 ```
 
-Solid lines are always used. Dotted lines are only used when that service's key is set.
+Solid lines are always used. Dotted lines are only used for Twi and Pidgin, with mock mode off.
 
-1. The page listens for you to start and stop talking and sends each phrase to the backend as a WAV recording. Without a Groq key the browser's own speech recognition is used instead.
-2. Groq Whisper turns the phrase into text and detects the language by itself. If Whisper was guessing (which often happens with Twi), Abena's speech recognition gives a second opinion.
+1. The browser's own speech recognition turns what you say into text. It listens in the language picked on the page, and in English when the picker is on "Detect automatically".
+2. When Ghana Twi or a Pidgin is picked, the page instead records each phrase (it finds the start and end itself) and sends it as WAV to the backend, where Abena's speech recognition turns it into text.
 3. The text goes to Gemini, which answers as JSON: the language it replies in, and the reply. The reply is streamed.
 4. The reply is cut into sentences. Each finished sentence is sent at once. English, French and Spanish are spoken by the browser's voices. Twi and both Pidgins are spoken by Abena voices.
 5. If you talk, type or press Stop while it is answering, the reply is cancelled on both sides.
@@ -71,20 +69,24 @@ uvicorn app.main:app --reload
 ```
 
 Open http://localhost:8000 in Chrome or Edge. Press the microphone and talk, or type.
+On Windows you can double click `start.bat` instead. It uses port 8001 and opens the page.
 The badges in the top right show which mode each piece is in.
 
 ### Using real services
 
 Copy `.env.example` to `.env`, set `MOCK_MODE=false`, and fill in the keys you have.
-Each piece falls back by itself if its key is missing:
+Each piece falls back by itself:
 
-| Piece | With its key | Without |
+| Piece | With `MOCK_MODE=false` | In mock mode, or without its key |
 | --- | --- | --- |
-| Replies and language detection | Gemini (`GEMINI_API_KEY`, model in `GEMINI_MODEL`) | Canned mock replies |
-| Listening | Groq Whisper (`GROQ_API_KEY`) | Browser speech recognition |
+| Replies and language detection | Gemini (needs `GEMINI_API_KEY` and `GEMINI_MODEL`) | Canned mock replies |
+| Listening for Twi and Pidgin | Abena (no key needed) | Browser speech recognition |
 | Voice for Twi and Pidgin | Abena (no key needed, `ABENA_API_KEY` optional) | Browser speech synthesis |
 
-English, French and Spanish are always spoken by the browser, so they use no credits.
+English, French and Spanish are always heard and spoken by the browser, so they use no credits.
+Automatic detection works on the text: type or say something and Gemini answers in that
+language. By ear the browser only listens in one language at a time, so to speak Twi or
+Pidgin, pick that language first.
 Keys stay on the backend. The browser is only told the mode names and the voice names.
 
 ### Language and voice
@@ -99,11 +101,13 @@ computer.
 ### Limits of the free tiers
 
 * **Abena** allows 20 requests a minute and 100 an hour without a key, and the text to
-  speech trial is small. Speech recognition from Abena is only asked when Whisper was
-  unsure, to save its 10 to 20 free transcriptions.
-* **Gemini and Groq** have their own free quotas. If one runs out, the page shows a short
-  error message and you can type instead.
-* Web search is not available with Gemini yet. Mock mode still fakes one for the page.
+  speech trial is small. Its speech recognition has only 10 to 20 free transcriptions, so
+  spoken Twi and Pidgin run out quickly. Typing always works.
+* **Gemini** has its own free quota, and it is small: a handful of requests a minute. When
+  it runs out the page says so and asks you to wait a minute. A request that stalls is
+  tried once more.
+* Web search is not available. The free Gemini tier has no quota for Google Search (checked
+  in November 2026: it answers 429). Mock mode still fakes a search for the page.
 
 ### Trying the mock
 
@@ -116,7 +120,8 @@ fake web search. Add the word *unreachable* to see a search that fails.
 pytest
 ```
 
-All tests run with no keys and no network. Gemini, Groq and Abena are faked.
+All tests run with no keys and no network. Gemini and Abena are faked. Two tests of the
+speech player run it in Node and are skipped when Node is not installed.
 `tests/conversations.json` holds whole conversations that are replayed in mock mode as a
 regression check. Add one whenever you fix a bug.
 
@@ -129,7 +134,9 @@ in a browser voice.
 | Setup | Measured | Notes |
 | --- | --- | --- |
 | Mock replies, browser voice | 0.9 to 1.3 s | Measured in an embedded Chromium while building. Almost all of it is the browser voice starting up. |
-| Real Groq, Gemini and Abena | not measured yet | Needs real keys. Run it, read the number under the status, and write it here. It includes the 0.8 s the recorder waits to be sure you finished. |
+| Real Gemini, typed, browser voice | 1.7 to 1.8 s | Measured in an embedded Chromium, November 2026. Gemini's first sentence is ready after about 1.2 s. |
+| Real Gemini, typed, Abena Twi voice | about 8 s | Abena needs 4 to 8 s to make the audio for a sentence. The status shows "Preparing the voice" meanwhile. |
+| Spoken into a real microphone | not measured yet | Run it, read the number under the status, and write it here. |
 
 ## Known limits
 
@@ -137,14 +144,12 @@ in a browser voice.
   voice using echo cancellation plus a loudness check, but loud speakers close to the
   microphone can still trigger it or mask you. Headphones are the reliable setup. The
   Stop button, the Esc key and typing always work.
-* The recorder decides a phrase is over after 0.8 s of quiet. Pauses longer than that
-  split a sentence in two.
-* Whisper can invent words from background noise. Very short sounds are ignored.
-* Whisper does not officially support Twi, and Abena's second opinion has a small free
-  quota. Typing always works.
-* With browser speech recognition (no Groq key), the first word or two of a barge in can
-  be lost, and on phones barge in by voice is off. Use Stop. With Groq it works on phones.
-* Browser speech recognition needs Chrome, Edge or Safari. Firefox gets the text box.
+* The phrase recorder (Twi and Pidgin) ends a phrase after 0.8 s of quiet and ignores
+  very short sounds.
+* With browser speech recognition, the first word or two of a barge in can be lost, and
+  on phones barge in by voice is off. Use Stop.
+* Browser speech recognition needs Chrome, Edge or Safari. Firefox gets the text box,
+  except for Twi and Pidgin, which Abena hears in any browser.
 * Sentences that end in an abbreviation such as "etc." are joined with the next one.
 * Conversation history lives in memory for the life of the connection. A reconnect
   starts a new conversation.
@@ -157,7 +162,6 @@ app/main.py          routes: the page, /health, /ws
 app/session.py       one connection: history, turns, barge in, phrases, audio
 app/brain.py         picks mock or Gemini
 app/gemini.py        Gemini streaming, reads the JSON reply as it arrives
-app/whisper.py       Groq Whisper request and its confidence check
 app/abena.py         Abena speech to text and text to speech
 app/abena_voices.py  the Abena voices offered per language
 app/languages.py     the languages and their prompts

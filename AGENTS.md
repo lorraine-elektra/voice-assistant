@@ -10,7 +10,7 @@ Full requirements live in `docs/spec.md`. If the code and the spec disagree, tel
 ## Stack
 * Python 3.11 or newer, FastAPI, WebSockets
 * Gemini API for the replies and language detection (streaming JSON)
-* Groq Whisper for speech to text (browser fallback), Abena AI as a second opinion for Twi
+* Speech to text: the browser's own speech recognition, and Abena AI for Twi and Pidgin
 * Abena AI voices for Twi and Pidgin text to speech, browser voices for the rest
 * Plain HTML and JavaScript frontend, no framework
 * pytest for tests
@@ -36,4 +36,4 @@ Full requirements live in `docs/spec.md`. If the code and the spec disagree, tel
 * At the end of a task, list what was done, what is left, and any inputs needed from the owner.
 
 ## Current phase
-Everything except deployment is built: text loop, the page, Groq Whisper, Gemini and Abena. Web search is not available with Gemini yet. See `docs/spec.md` for what is built and what is left.
+Everything except deployment is built: text loop, the page, Gemini and Abena. Groq Whisper was removed. Web search is not available with Gemini yet. See `docs/spec.md` for what is built and what is left.
