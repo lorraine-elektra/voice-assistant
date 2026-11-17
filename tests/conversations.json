@@ -1,0 +1,36 @@
+[
+  {
+    "name": "small talk gets a plain answer with no search",
+    "turns": [
+      {"say": "Hello, how are you?", "search": false, "hear": ["You said: Hello, how are you"]},
+      {"say": "Tell me a joke", "search": false, "hear": ["You said: Tell me a joke"]}
+    ]
+  },
+  {
+    "name": "a current question triggers a lookup and shows a source",
+    "turns": [
+      {"say": "What is the weather in Paris today?", "search": true, "sources": true,
+       "hear": ["Let me look that up.", "According to Example News"]}
+    ]
+  },
+  {
+    "name": "search then small talk in one conversation",
+    "turns": [
+      {"say": "Any news about space?", "search": true, "sources": true, "hear": ["Let me look that up."]},
+      {"say": "Thanks, that is all", "search": false, "hear": ["You said: Thanks, that is all"]}
+    ]
+  },
+  {
+    "name": "a failed search is admitted and still answered",
+    "turns": [
+      {"say": "Search for the unreachable page", "search": true, "sources": false, "failed": true,
+       "hear": ["I could not look that up", "From what I already know"]}
+    ]
+  },
+  {
+    "name": "tricky punctuation is spoken as one piece",
+    "turns": [
+      {"say": "Is pi 3.14 or so, Dr. Who", "search": false, "hear": ["You said: Is pi 3.14 or so, Dr. Who."]}
+    ]
+  }
+]
