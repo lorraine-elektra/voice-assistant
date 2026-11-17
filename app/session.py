@@ -20,6 +20,9 @@ BUSY_TEXT = "The assistant has reached its free usage limit for now. Please wait
 SLOW_TEXT = "The assistant took too long to answer. Please try again."
 ABENA_LIMIT_TEXT = "Abena could not hear that. Its free speech limit may be used up, so please type your message instead."
 PHRASE_FAILED_TEXT = "I could not hear that. Please try again."
+TOO_LONG_TEXT = "That message is too long. Please make it shorter."
+MAX_TEXT = 2000             # characters in one typed or spoken message
+MAX_AUDIO_CHARS = 2_000_000  # base64 of one phrase: 30 s of 16 kHz WAV is about 1.3 million
 
 
 def error_text(error: Exception) -> str:
@@ -80,13 +83,17 @@ class Session:
             if not text:
                 await self.send(type="error", message="I did not catch that. Please try again.")
                 return
+            if len(text) > MAX_TEXT:
+                await self.send(type="error", message=TOO_LONG_TEXT)
+                return
             await self.cancel_reply()
             self.turn += 1
             self.reply_task = asyncio.create_task(self.reply(self.turn, text))
         elif kind == "stop":
             await self.cancel_reply()
         elif kind == "settings":
-            language = LANGUAGES.get(message.get("language"))
+            wanted = message.get("language")
+            language = LANGUAGES.get(wanted) if isinstance(wanted, str) else None
             if language is None:
                 await self.send(type="error", message="That language is not available.")
                 return
@@ -110,6 +117,8 @@ class Session:
     async def hear_phrase(self, message: dict) -> None:
         """One recorded phrase from the browser. The words go back as a final transcript."""
         try:
+            if not isinstance(message["audio"], str) or len(message["audio"]) > MAX_AUDIO_CHARS:
+                raise ValueError("The phrase is not text, or is too large")
             audio = base64.b64decode(message["audio"])
             mime = str(message.get("mime") or "audio/wav")
             if self.http is None:

@@ -104,3 +104,34 @@ def test_a_question_stopped_before_any_answer_is_forgotten(client, monkeypatch):
         ws.send_json({"type": "user_text", "text": "third"})
         read_until(ws, "done")
     assert seen[-2:] == [["second"], ["second", "Fine.", "third"]]
+
+
+def test_odd_shaped_messages_do_not_break_the_connection(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        for bad in ('{"type": "settings", "language": ["en"]}', '{"type": "settings", "language": {"a": 1}}',
+                    '{"type": "phrase", "audio": 5}', '[1, 2]', '{"type": {"a": 1}}'):
+            ws.send_text(bad)
+            assert ws.receive_json()["type"] == "error"
+        ws.send_json({"type": "user_text", "text": "hi"})
+        assert read_until(ws, "done")[-1]["turn"] == 1
+
+
+def test_a_huge_message_is_refused(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "user_text", "text": "a" * 2001})
+        assert "too long" in ws.receive_json()["message"]
+        ws.send_json({"type": "phrase", "mime": "audio/wav", "audio": "A" * 2_000_001})
+        assert ws.receive_json()["type"] == "error"
+
+
+def test_only_our_own_page_may_open_the_socket(client):
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws", headers={"origin": "http://evil.example"}):
+            pass
+    with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+        assert ws.receive_json()["type"] == "ready"
