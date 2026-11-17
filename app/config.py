@@ -18,8 +18,6 @@ class Settings:
     mock_mode: bool
     gemini_api_key: str
     gemini_model: str
-    groq_api_key: str
-    groq_model: str
     abena_api_key: str
     # Mock timing, so the mock feels like a real stream. Tests change these.
     mock_word_delay: float = 0.04
@@ -27,13 +25,9 @@ class Settings:
 
     @property
     def brain_mode(self) -> str:
-        """'gemini' when we can really call Gemini, otherwise 'mock'."""
-        return "gemini" if not self.mock_mode and self.gemini_api_key else "mock"
-
-    @property
-    def stt_mode(self) -> str:
-        """Speech to text: 'whisper' (Groq) with a key, otherwise the browser does it."""
-        return "whisper" if not self.mock_mode and self.groq_api_key else "browser"
+        """'gemini' when we can really call Gemini (key and model both set), otherwise 'mock'."""
+        ready = not self.mock_mode and self.gemini_api_key and self.gemini_model
+        return "gemini" if ready else "mock"
 
     @property
     def tts_mode(self) -> str:
@@ -43,7 +37,7 @@ class Settings:
 
     @property
     def abena_mode(self) -> bool:
-        """Abena speaks Twi and Pidgin whenever we are not in mock mode. Its playground API
+        """Abena speaks, and listens for, Twi and Pidgin whenever we are not in mock mode. Its playground API
         works without a key, so ABENA_API_KEY is optional and only sent when set."""
         return not self.mock_mode
 
@@ -56,9 +50,7 @@ def load_settings() -> Settings:
     return Settings(
         mock_mode=_env("MOCK_MODE", "true").lower() in ("1", "true", "yes"),
         gemini_api_key=_env("GEMINI_API_KEY"),
-        gemini_model=_env("GEMINI_MODEL", "gemini-3.5-flash"),
-        groq_api_key=_env("GROQ_API_KEY"),
-        groq_model=_env("GROQ_MODEL", "whisper-large-v3"),
+        gemini_model=_env("GEMINI_MODEL"),
         abena_api_key=_env("ABENA_API_KEY"),
     )
 

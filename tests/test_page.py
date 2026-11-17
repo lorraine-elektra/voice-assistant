@@ -6,7 +6,7 @@ def test_page_is_served_with_its_controls(client):
 
 
 def test_scripts_and_styles_are_served(client):
-    names = ("app.js", "speech-in.js", "speech-in-whisper.js", "speech-out.js", "mic.js",
+    names = ("app.js", "speech-in.js", "speech-in-phrase.js", "speech-out.js", "mic.js",
              "pcm-worklet.js", "style.css", "choices.js")
     for name in names:
         assert client.get(f"/static/{name}").status_code == 200

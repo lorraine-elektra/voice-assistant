@@ -1,4 +1,4 @@
-// Speech to text through the backend, which sends each phrase to Whisper (Groq).
+// Speech to text through the backend, which sends each phrase to Abena (Twi and Pidgin).
 // The page listens for the user to start and stop talking, keeps that phrase as a
 // WAV recording and sends it. Same shape as BrowserListener, so app.js can use either.
 //
@@ -52,7 +52,7 @@ function toBase64(buffer) {
   return btoa(binary);
 }
 
-export class WhisperListener {
+export class PhraseListener {
   // sendJson writes to the WebSocket. Handlers are as in BrowserListener.
   constructor({ mic, sendJson, onInterim, onFinal }) {
     this.mic = mic;
@@ -70,7 +70,7 @@ export class WhisperListener {
     this.active = active;
   }
 
-  // Whisper works out the language by itself, so there is nothing to do.
+  // The backend knows the language from the settings message, so there is nothing to do.
   setLanguage() {}
 
   // After a barge in: start the phrase with the audio from just before it was detected.

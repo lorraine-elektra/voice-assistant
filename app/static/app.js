@@ -2,7 +2,7 @@
 import { Player, canSpeak } from "./speech-out.js";
 import { Choices } from "./choices.js";
 import { BrowserListener, recognitionSupported } from "./speech-in.js";
-import { WhisperListener } from "./speech-in-whisper.js";
+import { PhraseListener } from "./speech-in-phrase.js";
 import { Mic, isPhone } from "./mic.js";
 import { robot, restyle } from "./robot.js";
 
@@ -30,7 +30,6 @@ const state = {
   turn: 0,           // counts user messages, exactly like the backend does
   activeTurn: null,  // the turn whose reply we accept. Anything else is stale.
   brain: "?",
-  stt: "browser",    // who turns speech into text: "browser" or "whisper"
   tts: "browser",    // who speaks Twi and Pidgin: "browser" or "abena"
   abena: false,      // Abena is on: it speaks, and listens for, Twi and Pidgin
 };
@@ -40,7 +39,7 @@ let pendingBubble = null;       // live words while the user is still talking
 const replyBubbles = new Map(); // turn -> the assistant's bubble
 const audioWaiters = new Map(); // sentence index -> function that delivers its audio
 let timing = null;              // measures end of speech to first spoken word
-let listener = null;            // BrowserListener or WhisperListener, see chooseListener
+let listener = null;            // BrowserListener or PhraseListener, see chooseListener
 
 const player = new Player({
   onStart: (sentence) => { markLive(sentence); reportLatency(); sync(); },
@@ -110,17 +109,17 @@ const listenerHandlers = {
   },
 };
 
-// Who listens for the current language: the backend (Whisper, or Abena for Twi and Pidgin when
-// there is no Whisper key) or the browser's own recognition.
+// Who listens for the current language: the backend (Abena, for Twi and Pidgin) or the
+// browser's own recognition (everything else, including automatic).
 const LOCAL = ["tw", "pcm-GH", "pcm-NG"];
-const backendListens = () => state.stt === "whisper" || (state.abena && LOCAL.includes(choices.language.id));
+const backendListens = () => state.abena && LOCAL.includes(choices.language.id);
 let listenerKind = null;
 
 function chooseListener() {
   listener?.setActive(false);
   listenerKind = backendListens() ? "backend" : "browser";
   if (listenerKind === "backend") {
-    listener = new WhisperListener({ mic, sendJson: send, ...listenerHandlers });
+    listener = new PhraseListener({ mic, sendJson: send, ...listenerHandlers });
   } else {
     mic.onChunk = null;
     listener = recognitionSupported ? new BrowserListener(listenerHandlers) : null;
@@ -165,7 +164,7 @@ function sync() {
 function showModes() {
   const modes = [
     ["Brain", state.brain],
-    ["Listening", listener ? (listenerKind === "browser" ? "browser" : state.stt === "whisper" ? "whisper" : "abena") : "typing only"],
+    ["Listening", listener ? (listenerKind === "browser" ? "browser" : "abena") : "typing only"],
     ["Voice", state.tts === "abena" ? "browser + abena" : canSpeak ? "browser" : "text only"],
   ];
   els.modes.replaceChildren(...modes.map(([name, value]) => {
@@ -317,7 +316,7 @@ function applyChoices() {
 }
 
 function onReady(message) {
-  Object.assign(state, { brain: message.brain, stt: message.stt, tts: message.tts, abena: Boolean(message.abena) });
+  Object.assign(state, { brain: message.brain, tts: message.tts, abena: Boolean(message.abena) });
   choices.setOptions(message);
   chooseListener();
   applyChoices();
@@ -352,7 +351,7 @@ function onMessage(message) {
       : null;
     player.enqueue(message.text, audio, sentence);
   }
-  if (message.type === "audio") audioWaiters.get(message.index)?.(message.audio && { audio: message.audio, mime: message.mime || "audio/mpeg" });
+  if (message.type === "audio") audioWaiters.get(message.index)?.(message.audio && { audio: message.audio, mime: message.mime || "audio/wav" });
   if (message.type === "sources") addSources(turn, message.sources);
   if (message.type === "search_failed") addNote(turn, "The web search did not work, so this answer is from memory.");
   if (message.type === "done") state.backend = null;

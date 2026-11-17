@@ -1,7 +1,7 @@
 """The languages the assistant can use. One row per language, nothing else decides it.
 
-Gemini replies in the language it detects or the one picked on the page. Whisper (Groq)
-detects what was said by itself. Abena speaks Twi and both Pidgins, the browser the rest.
+Gemini replies in the language it detects or the one picked on the page. Abena speaks and
+listens for Twi and both Pidgins, the browser does both for the rest.
 """
 from dataclasses import dataclass
 

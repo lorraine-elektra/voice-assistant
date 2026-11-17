@@ -165,3 +165,11 @@ def test_the_free_limit_and_a_timeout_get_their_own_messages(client, monkeypatch
     assert "too long" in failing_reply(client, monkeypatch, httpx.ReadTimeout("stalled"))["message"]
     other = failing_reply(client, monkeypatch, RuntimeError("secret detail"))
     assert other["turn"] == 1 and "secret" not in other["message"]
+
+
+def test_real_gemini_mode_needs_a_model_too(client, monkeypatch):
+    monkeypatch.setattr(settings, "mock_mode", False)
+    monkeypatch.setattr(settings, "gemini_api_key", "gm-test")
+    monkeypatch.setattr(settings, "gemini_model", "")
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["brain"] == "mock"

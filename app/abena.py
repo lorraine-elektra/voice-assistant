@@ -1,4 +1,4 @@
-"""Abena AI: Twi and Pidgin text to speech, and Twi speech to text.
+"""Abena AI: text to speech and speech to text for Twi and both Pidgins.
 Docs: https://abena.mobobi.com/playground/sdk/docs/
 """
 import base64
@@ -11,10 +11,10 @@ TTS_API = "https://abena.mobobi.com/playground/api/v1/tts/synthesize/"
 ASR_API = "https://abena.mobobi.com/playground/api/v1/asr/transcribe/"
 MAX_CHARS = 500  # the longest text Abena speaks in one request
 MIME = "audio/wav"
-# Languages where Abena listens for the user when there is no Whisper (Groq) key.
-LISTENS_FOR = ("tw", "pcm-GH", "pcm-NG")
 # Which Abena recogniser to use for each of our language ids.
-ASR_LANGUAGES = {"tw": "twi-en", "en": "en", "pcm-GH": "gpe", "pcm-NG": "pcm"}
+ASR_LANGUAGES = {"tw": "twi-en", "pcm-GH": "gpe", "pcm-NG": "pcm"}
+# Languages where Abena listens for the user. The browser listens for the others.
+LISTENS_FOR = tuple(ASR_LANGUAGES)
 
 
 def _headers() -> dict:
@@ -32,7 +32,7 @@ async def synthesize(http: httpx.AsyncClient, text: str, voice: str) -> bytes:
 
 
 async def transcribe(http: httpx.AsyncClient, audio: bytes, mime: str = "audio/webm", language_id: str = "tw") -> str:
-    """Returns the words in a recording. Meant as the second opinion for Twi."""
+    """Returns the words in a recording of Twi or Pidgin."""
     response = await http.post(
         ASR_API,
         headers=_headers(),

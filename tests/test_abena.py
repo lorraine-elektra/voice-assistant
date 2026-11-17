@@ -163,7 +163,7 @@ def test_transcribe_sends_the_recording_as_audio_file_with_a_language(abena_key)
     assert b'name="audio_file"' in seen["body"] and b"audio-bytes" in seen["body"] and b"twi-en" in seen["body"]
 
 
-# ---------- Abena listens for Twi and Pidgin when there is no Whisper key ----------
+# ---------- Abena listens for Twi and Pidgin, the browser for the rest ----------
 
 def hear_with_abena(client, language, fake):
     import base64 as b64
@@ -175,9 +175,8 @@ def hear_with_abena(client, language, fake):
         return ws.receive_json()
 
 
-def test_without_groq_abena_hears_twi(client, monkeypatch):
+def test_abena_hears_twi(client, monkeypatch):
     monkeypatch.setattr(settings, "mock_mode", False)
-    monkeypatch.setattr(settings, "groq_api_key", "")
     asked = {}
 
     async def fake(http, audio, mime, language_id):
@@ -189,9 +188,8 @@ def test_without_groq_abena_hears_twi(client, monkeypatch):
     assert asked["language"] == "tw"
 
 
-def test_without_groq_other_languages_are_not_sent_to_abena(client, monkeypatch):
+def test_other_languages_are_not_sent_to_abena(client, monkeypatch):
     monkeypatch.setattr(settings, "mock_mode", False)
-    monkeypatch.setattr(settings, "groq_api_key", "")
 
     async def never(*args):
         raise AssertionError("Abena should not be called for English")
@@ -202,7 +200,6 @@ def test_without_groq_other_languages_are_not_sent_to_abena(client, monkeypatch)
 
 def test_abena_limit_gives_a_clear_message(client, monkeypatch):
     monkeypatch.setattr(settings, "mock_mode", False)
-    monkeypatch.setattr(settings, "groq_api_key", "")
 
     async def refused(http, audio, mime, language_id):
         request = httpx.Request("POST", abena.ASR_API)
@@ -211,3 +208,34 @@ def test_abena_limit_gives_a_clear_message(client, monkeypatch):
     monkeypatch.setattr(abena, "transcribe", refused)
     reply = hear_with_abena(client, "tw", refused)
     assert reply["type"] == "error" and "type your message" in reply["message"]
+
+
+def test_a_failed_transcription_is_a_friendly_error(client, monkeypatch):
+    monkeypatch.setattr(settings, "mock_mode", False)
+
+    async def broken(http, audio, mime, language_id):
+        raise httpx.ConnectError("Abena is down")
+
+    monkeypatch.setattr(abena, "transcribe", broken)
+    reply = hear_with_abena(client, "pcm-NG", broken)
+    assert reply["type"] == "error" and "turn" not in reply
+
+
+def test_the_transcript_can_start_a_turn_like_typed_text(client, monkeypatch):
+    monkeypatch.setattr(settings, "mock_mode", False)
+
+    async def fake(http, audio, mime, language_id):
+        return "hello"
+
+    async def fake_reply(history, language, name=""):
+        yield {"type": "text", "text": "Hi."}
+
+    monkeypatch.setattr(abena, "transcribe", fake)
+    monkeypatch.setattr("app.session.reply_events", fake_reply)
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "settings", "language": "tw", "voice": ""})
+        ws.send_json({"type": "phrase", "mime": "audio/wav", "audio": base64.b64encode(b"RIFFpcm").decode()})
+        assert ws.receive_json()["final"] is True
+        ws.send_json({"type": "user_text", "text": "hello"})
+        assert read_until(ws, "done")[-1]["turn"] == 1

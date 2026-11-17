@@ -8,7 +8,7 @@ import time
 import httpx
 from fastapi import WebSocket
 
-from app import abena, abena_voices, whisper
+from app import abena, abena_voices
 from app.brain import reply_events
 from app.config import settings
 from app.languages import DEFAULT, LANGUAGES, for_browser
@@ -44,7 +44,7 @@ class Session:
         self.name = ""  # what the user calls the assistant
         self.reply_task: asyncio.Task | None = None
         self.phrase_tasks: set[asyncio.Task] = set()  # phrases being transcribed
-        self.http: httpx.AsyncClient | None = None  # reused for every Groq and Abena request
+        self.http: httpx.AsyncClient | None = None  # reused for every Abena request
         self._send_lock = asyncio.Lock()
 
     async def send(self, **message) -> None:
@@ -53,7 +53,7 @@ class Session:
 
     async def run(self) -> None:
         await self.send(
-            type="ready", brain=settings.brain_mode, stt=settings.stt_mode, tts=settings.tts_mode,
+            type="ready", brain=settings.brain_mode, tts=settings.tts_mode,
             languages=for_browser(), abena=settings.abena_mode,
             abena_voices=abena_voices.for_browser() if settings.abena_mode else {},
         )
@@ -112,7 +112,7 @@ class Session:
         else:
             await self.send(type="error", message=f"Unknown message type: {kind}")
 
-    # ---------- speech to text: Groq Whisper, with Abena as a second opinion ----------
+    # ---------- speech to text: Abena hears Twi and Pidgin, the browser hears the rest ----------
 
     async def hear_phrase(self, message: dict) -> None:
         """One recorded phrase from the browser. The words go back as a final transcript."""
@@ -123,36 +123,20 @@ class Session:
             mime = str(message.get("mime") or "audio/wav")
             if self.http is None:
                 self.http = httpx.AsyncClient()
-            if settings.stt_mode == "whisper":
-                heard = await whisper.transcribe(self.http, audio, mime)
-                text = heard.text
-                if not heard.confident and settings.abena_mode:
-                    text = await self.second_opinion(audio, mime) or text
-            elif settings.abena_mode and self.language.id in abena.LISTENS_FOR:
-                # No Whisper key: Abena listens for Twi and Pidgin. Its free use is limited.
-                try:
-                    text = await abena.transcribe(self.http, audio, mime, self.language.id)
-                except httpx.HTTPStatusError as error:
-                    log.warning("Abena could not transcribe: %s", error)
-                    await self.send(type="error", message=ABENA_LIMIT_TEXT)
-                    return
-            else:
+            if not (settings.abena_mode and self.language.id in abena.LISTENS_FOR):
                 raise RuntimeError("No speech to text service for this language")
+            try:  # Abena's free use is limited, so a refusal gets its own message
+                text = await abena.transcribe(self.http, audio, mime, self.language.id)
+            except httpx.HTTPStatusError as error:
+                log.warning("Abena could not transcribe: %s", error)
+                await self.send(type="error", message=ABENA_LIMIT_TEXT)
+                return
             await self.send(type="transcript", text=text, final=True)
         except asyncio.CancelledError:
             raise
         except Exception as error:
             log.warning("Could not transcribe a phrase: %s", error)
             await self.send(type="error", message=PHRASE_FAILED_TEXT)
-
-    async def second_opinion(self, audio: bytes, mime: str) -> str:
-        """Whisper was guessing, which often means Twi. Ask Abena. "" if it cannot help."""
-        language = self.language.id if self.language.id in abena.ASR_LANGUAGES else "tw"
-        try:
-            return await abena.transcribe(self.http, audio, mime, language)
-        except Exception as error:
-            log.warning("Abena could not give a second opinion: %s", error)
-            return ""
 
     # ---------- the reply ----------
 

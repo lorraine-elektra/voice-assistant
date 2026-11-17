@@ -14,24 +14,24 @@ from tests.conftest import read_until
 
 @pytest.fixture
 def real_voice(monkeypatch):
-    """Pretend the Groq and Abena keys are set. The brain stays on the mock (no Gemini key)."""
+    """Mock mode off with an Abena key. The brain stays on the mock (no Gemini key)."""
     monkeypatch.setattr(settings, "mock_mode", False)
-    monkeypatch.setattr(settings, "groq_api_key", "gq-test")
     monkeypatch.setattr(settings, "abena_api_key", "ab-test")
 
 
 def test_no_keys_means_everything_runs_in_the_browser_and_mock(client):
     with client.websocket_connect("/ws") as ws:
         ready = ws.receive_json()
-    assert (ready["brain"], ready["stt"], ready["tts"], ready["abena"]) == ("mock", "browser", "browser", False)
+    assert (ready["brain"], ready["tts"], ready["abena"]) == ("mock", "browser", False)
+    assert "stt" not in ready  # the page decides who listens from `abena` and the language
 
 
 def test_keys_switch_on_the_real_services_but_never_reach_the_browser(client, real_voice, monkeypatch):
     monkeypatch.setattr(settings, "gemini_api_key", "gm-test")
     with client.websocket_connect("/ws") as ws:
         ready = ws.receive_json()
-    assert (ready["brain"], ready["stt"], ready["tts"]) == ("gemini", "whisper", "abena")
-    assert not {"gq-test", "ab-test", "gm-test"} & set(json.dumps(ready).replace('"', " ").split())
+    assert (ready["brain"], ready["tts"]) == ("gemini", "abena")
+    assert not {"ab-test", "gm-test"} & set(json.dumps(ready).replace('"', " ").split())
     assert "-test" not in json.dumps(ready)
 
 
@@ -39,7 +39,7 @@ def test_mock_mode_ignores_keys(client, real_voice, monkeypatch):
     monkeypatch.setattr(settings, "mock_mode", True)
     with client.websocket_connect("/ws") as ws:
         ready = ws.receive_json()
-    assert (ready["stt"], ready["tts"]) == ("browser", "browser")
+    assert (ready["tts"], ready["abena"]) == ("browser", False)
 
 
 def tw_reply(monkeypatch, synthesize):

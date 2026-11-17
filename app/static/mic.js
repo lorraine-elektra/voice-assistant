@@ -1,6 +1,6 @@
 // The microphone. Two jobs:
 //   1. Watch the sound level while the assistant speaks, to detect barge in.
-//   2. In Whisper mode, hand out raw audio chunks for the phrase recorder.
+//   2. When the backend listens (Twi and Pidgin), hand out raw audio chunks for the phrase recorder.
 //
 // The hard part of barge in is not reacting to the assistant's own voice coming out
 // of the speakers. Three things guard against that:
@@ -45,7 +45,7 @@ export class VoiceDetector {
 export class Mic {
   constructor(onVoice) {
     this.onVoice = onVoice;   // the user started talking over the assistant
-    this.onChunk = null;      // set by the Whisper listener to receive raw audio
+    this.onChunk = null;      // set by the phrase listener to receive raw audio
     this.preroll = [];        // the most recent chunks
     this.detector = new VoiceDetector();
   }
@@ -55,7 +55,7 @@ export class Mic {
   }
 
   // Asks for the microphone. Throws if permission is denied.
-  // rawAudio: also produce chunks of raw audio (needed for Whisper only).
+  // rawAudio: also produce chunks of raw audio (needed for the phrase recorder only).
   async open({ rawAudio }) {
     if (this.stream) return;
     this.stream = await navigator.mediaDevices.getUserMedia({

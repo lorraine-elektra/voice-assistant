@@ -9,8 +9,9 @@ from app.main import app
 def mock_mode(monkeypatch):
     """Every test runs with no keys, whatever is in the developer's .env."""
     monkeypatch.setattr(settings, "mock_mode", True)
-    for key in ("gemini_api_key", "groq_api_key", "abena_api_key"):
+    for key in ("gemini_api_key", "abena_api_key"):
         monkeypatch.setattr(settings, key, "")
+    monkeypatch.setattr(settings, "gemini_model", "test-model")
     monkeypatch.setattr(settings, "mock_word_delay", 0)
     monkeypatch.setattr(settings, "mock_search_delay", 0)
 
